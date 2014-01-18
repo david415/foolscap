@@ -1364,6 +1364,9 @@ class TubConnector(object):
         self.stopConnectionTimer()
         for c in self.pendingConnections.values():
             c.cancel()
+            # XXX we call cancel method instead of disconnect
+            # because we passed in a connect deferred instead of a IConnector
+
         # as each disconnect() finishes, it will either trigger our
         # clientConnectionFailed or our negotiationFailed methods, both of
         # which will trigger checkForIdle, and the last such message will
@@ -1373,48 +1376,33 @@ class TubConnector(object):
         socks_addr = '127.0.0.1'
         socks_port = 9050
 
-        while self.remainingLocations:
-            location = self.remainingLocations.pop()
-            q(location)
-            if location in self.attemptedLocations:
-                continue
+        location = self.remainingLocations.pop()
+        self.attemptedLocations.append(location)
 
-            self.attemptedLocations.append(location)
+        lp = self.log("connectTCP to %s" % (location,))
+        
+        host = location[1]
+        port = location[2]
 
-            lp = self.log("connectTCP to %s" % (location,))
-            
-            # does the tub really need our hostname?
-            tubFactory = TubConnectorClientFactory(self, "unknown-host", lp)
-            q(tubFactory)
-            endpoint = clientFromString(reactor, location)
-            q(endpoint)
-            connect_deferred = endpoint.connect(tubFactory)
-            q(connect_deferred)
-#            if location.startswith("tor"):
-#                # BUG: use the Twisted endpoint plugin system instead of
-#                # this hack
-#
-#                field = location.split(':')
-#                host = field[1]
-#                port = field[2]
-#
-#                TCPPoint   = TCP4ClientEndpoint(reactor, socks_addr, socks_port)
-#                SOCKSPoint = SOCKS5ClientEndpoint(host, port, TCPPoint)
-#                d = SOCKSPoint.connect(f)
-#            else:
+        # XXX how is the hostname used here?
+        tubFactory = TubConnectorClientFactory(self, host, lp)
+        endpoint   = TCP4ClientEndpoint(reactor, host, port)
 
+        q(endpoint)
 
-            self.pendingConnections[f] = connect_deferred
-            # the tcp.Connector that we get back from reactor.connectTCP will
-            # retain a reference to the transport that it creates, so we can
-            # use it to disconnect the established (but not yet negotiated)
-            # connection
-            if self.tub.options.get("debug_stall_second_connection"):
+        # XXX is this correct?
+        connect_deferred = endpoint.connect(tubFactory)
+
+        # XXX this should work... if we just replace calls
+        # to disconnect() with cancel()
+        self.pendingConnections[f] = connect_deferred
+
+        if self.tub.options.get("debug_stall_second_connection"):
                 # for unit tests, hold off on making the second connection
                 # for a moment. This allows the first connection to get to a
                 # known state.
-                reactor.callLater(0.1, self.connectToAll)
-                return
+            reactor.callLater(0.1, self.connectToAll)
+            return
         self.checkForFailure()
 
     def connectionTimedOut(self):
@@ -1469,7 +1457,9 @@ class TubConnector(object):
             # clientConnectionFailed. For connections that are established
             # (and exchanging negotiation messages), this does
             # loseConnection() and will thus trigger negotiationFailed.
-            f.disconnect()
+            f.cancel()
+            # XXX we call cancel instead of disconnect
+
         self.checkForIdle()
 
     def checkForFailure(self):
