@@ -789,7 +789,7 @@ def encode_location_hint(hint):
 
 # Each location hint must start with "TYPE:" (where TYPE is alphanumeric) and
 # then can contain any characters except "," and "/". These are expected to
-# look like Twisted endpoin descriptors, or contain other ":"-separated
+# look like Twisted endpoint descriptors, or contain other ":"-separated
 # fields (e.g. "TYPE:key=value:key=value" or "TYPE:stuff:morestuff"). We also
 # accept old-syle implicit TCP hints (host:port). To avoid being interpreted
 # as an old-style hint, the part after TYPE: may not consist of only 1-5
@@ -812,17 +812,10 @@ def decode_location_hints(hints_s):
 
             mo = OLD_STYLE_HINT_RE.search(hint_s)
             if mo:
-                hint = ( "tcp", mo.group(1), int(mo.group(2)) )
-                hints.append(hint)
+                hints.append("tcp:%s:%s" % (mo.group(1), mo.group(2)))
             else:
-                pieces = hint_s.split(':')
-                if pieces[0] == 'tcp':
-                    fields = dict([f.split("=") for f in pieces[1:]])
-                    hint = ("tcp", fields["host"], int(fields["port"]))
-                    hints.append(hint)
-                else:
-                    # Ignore other things from the future.
-                    pass
+                hints.append(hint_s)
+
     return hints
 
 def decode_furl(furl):

@@ -1,9 +1,11 @@
+import q
 # -*- test-case-name: foolscap.test.test_negotiate -*-
 
 import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
 from twisted.internet.error import ConnectionDone
+from twisted.internet.endpoints import clientFromString
 
 from foolscap import broker, referenceable, vocab
 from foolscap.eventual import eventually
@@ -1310,14 +1312,8 @@ class TubConnector(object):
                                   facility="foolscap.connection")
         self.tub = parent
         self.target = tubref
-        hints = []
-        # filter out the hints that we can actually use.. there may be
-        # extensions from the future sitting in this list
-        for h in self.target.getLocations():
-            if h[0] == "tcp":
-                (host, port) = h[1:]
-                hints.append( (host, port) )
-        self.remainingLocations = hints
+        self.remainingLocations = self.target.getLocations()
+
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
         self.attemptedLocations = []
@@ -1367,23 +1363,48 @@ class TubConnector(object):
         self.remainingLocations = []
         self.stopConnectionTimer()
         for c in self.pendingConnections.values():
-            c.disconnect()
+            c.cancel()
         # as each disconnect() finishes, it will either trigger our
         # clientConnectionFailed or our negotiationFailed methods, both of
         # which will trigger checkForIdle, and the last such message will
         # invoke self.tub.connectorFinished()
 
     def connectToAll(self):
+        socks_addr = '127.0.0.1'
+        socks_port = 9050
+
         while self.remainingLocations:
             location = self.remainingLocations.pop()
+            q(location)
             if location in self.attemptedLocations:
                 continue
+
             self.attemptedLocations.append(location)
-            host, port = location
+
             lp = self.log("connectTCP to %s" % (location,))
-            f = TubConnectorClientFactory(self, host, lp)
-            c = reactor.connectTCP(host, port, f)
-            self.pendingConnections[f] = c
+            
+            # does the tub really need our hostname?
+            tubFactory = TubConnectorClientFactory(self, "unknown-host", lp)
+            q(tubFactory)
+            endpoint = clientFromString(reactor, location)
+            q(endpoint)
+            connect_deferred = endpoint.connect(tubFactory)
+            q(connect_deferred)
+#            if location.startswith("tor"):
+#                # BUG: use the Twisted endpoint plugin system instead of
+#                # this hack
+#
+#                field = location.split(':')
+#                host = field[1]
+#                port = field[2]
+#
+#                TCPPoint   = TCP4ClientEndpoint(reactor, socks_addr, socks_port)
+#                SOCKSPoint = SOCKS5ClientEndpoint(host, port, TCPPoint)
+#                d = SOCKSPoint.connect(f)
+#            else:
+
+
+            self.pendingConnections[f] = connect_deferred
             # the tcp.Connector that we get back from reactor.connectTCP will
             # retain a reference to the transport that it creates, so we can
             # use it to disconnect the established (but not yet negotiated)
