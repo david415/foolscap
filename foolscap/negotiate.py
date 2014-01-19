@@ -4,6 +4,9 @@ import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
 from twisted.internet.error import ConnectionDone
+from twisted.internet.endpoints import TCP4ClientEndpoint
+
+from txsocksx.client import SOCKS5ClientEndpoint
 
 from foolscap import broker, referenceable, vocab
 from foolscap.eventual import eventually
@@ -1367,7 +1370,9 @@ class TubConnector(object):
         self.remainingLocations = []
         self.stopConnectionTimer()
         for c in self.pendingConnections.values():
-            c.disconnect()
+            #c.disconnect()
+            # XXX
+            c.cancel()
         # as each disconnect() finishes, it will either trigger our
         # clientConnectionFailed or our negotiationFailed methods, both of
         # which will trigger checkForIdle, and the last such message will
@@ -1379,10 +1384,15 @@ class TubConnector(object):
             if location in self.attemptedLocations:
                 continue
             self.attemptedLocations.append(location)
+
             host, port = location
-            lp = self.log("connectTCP to %s" % (location,))
-            f = TubConnectorClientFactory(self, host, lp)
-            c = reactor.connectTCP(host, port, f)
+            lp         = self.log("connectTCP to %s" % (location,))
+            f          = TubConnectorClientFactory(self, host, lp)
+
+            tcp_endpoint   = TCP4ClientEndpoint(reactor, '127.0.0.1', 9050)
+            socks_endpoint = SOCKS5ClientEndpoint(host, port, tcp_endpoint)
+            c              = socks_endpoint.connect(f)
+
             self.pendingConnections[f] = c
             # the tcp.Connector that we get back from reactor.connectTCP will
             # retain a reference to the transport that it creates, so we can
