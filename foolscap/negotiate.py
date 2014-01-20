@@ -1279,7 +1279,6 @@ class TubConnectorClientFactory(protocol.ClientFactory, object):
     def clientConnectionFailed(self, connector, reason):
         self.tc.clientConnectionFailed(self, reason)
 
-
 class TubConnector(object):
     """I am used to make an outbound connection. I am given a target TubID
     and a list of locationHints, and I try all of them until I establish a
@@ -1313,7 +1312,7 @@ class TubConnector(object):
         self.target = tubref
         hints = []
 
-        self.remainingEndpoints = map(lambda x:"%s:%s:%s" % x, self.target.getLocations())
+        self.remainingEndpoints = self.target.getLocations()
 
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
@@ -1377,9 +1376,8 @@ class TubConnector(object):
                 continue
             self.attemptedEndpoints.append(endpointDesc)
 
-            host     = endpointDesc.split(':')[1]
             lp       = self.log("connectTCP to %s" % (endpointDesc,))
-            f        = TubConnectorClientFactory(self, host, lp)
+            f        = TubConnectorClientFactory(self, endpointDesc, lp)
             endpoint = clientFromString(reactor, endpointDesc)
 
             self.pendingConnections[f] = endpoint.connect(f)

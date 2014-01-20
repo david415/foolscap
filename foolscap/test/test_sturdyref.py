@@ -10,14 +10,14 @@ class URL(unittest.TestCase):
         sr = SturdyRef("pb://%s@127.0.0.1:9900/name" % TUB1)
         self.failUnlessEqual(sr.tubID, TUB1)
         self.failUnlessEqual(sr.locationHints,
-                             [ ("tcp", "127.0.0.1", 9900) ])
+                             [ "tcp:host=127.0.0.1:port=9900" ])
         self.failUnlessEqual(sr.name, "name")
 
     def testURLTcp(self):
         sr = SturdyRef("pb://%s@tcp:host=127.0.0.1:port=9900/name" % TUB1)
         self.failUnlessEqual(sr.tubID, TUB1)
         self.failUnlessEqual(sr.locationHints,
-                             [ ("tcp", "127.0.0.1", 9900) ])
+                             [ "tcp:127.0.0.1:9900" ])
         self.failUnlessEqual(sr.name, "name")
 
     def testTubIDExtensions(self):
@@ -31,7 +31,7 @@ class URL(unittest.TestCase):
         furl = "pb://%s@127.0.0.1:9900,udp:127.0.0.1:7700/name" % TUB1
         sr = SturdyRef(furl)
         self.failUnlessEqual(sr.locationHints,
-                             [ ("tcp", "127.0.0.1", 9900) ])
+                             [ "tcp:127.0.0.1:9900" ])
         self.failUnlessEqual(sr.getURL(), furl)
 
         furl = "pb://%s@udp:127.0.0.1:7700/name" % TUB1
@@ -61,8 +61,8 @@ class URL(unittest.TestCase):
         sr = SturdyRef(url)
         self.failUnlessEqual(sr.tubID, TUB1)
         self.failUnlessEqual(sr.locationHints,
-                             [ ("tcp", "127.0.0.1", 9900),
-                               ("tcp", "remote", 8899) ])
+                             [ "tcp:127.0.0.1:9900",
+                               "tcp:remote:8899" ])
         self.failUnlessEqual(sr.name, "name")
 
     def testBrokenHints(self):
