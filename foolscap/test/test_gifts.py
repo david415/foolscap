@@ -452,7 +452,7 @@ class Bad(Base, unittest.TestCase):
             (encrypted, tubid, location_hints, name) = \
                 decode_furl(adave.tracker.url)
             # highly unlikely that there's anything listening on this port
-            location_hints = [ ("tcp", "127.0.0.1", 2) ]
+            locations_hints = [ "tcp:host=127.0.0.1:port=2" ]
             adave.tracker.url = encode_furl(encode_furl, tubid,
                                             location_hints, name)
             return self.shouldFail(ConnectionRefusedError, "Bad.test_location",
@@ -477,7 +477,7 @@ class Bad(Base, unittest.TestCase):
             # connection timeout.
             (encrypted, tubid, location_hints, name) = \
                 decode_furl(adave.tracker.url)
-            location_hints = [ ("tcp", "127.0.0.1", p.getHost().port) ]
+            location_hints = [ "tcp:host=127.0.0.1:port=" + p.getHost().port ]
             adave.tracker.url = encode_furl(encode_furl, tubid,
                                             location_hints, name)
             self.tubD.options['connect_timeout'] = 2
