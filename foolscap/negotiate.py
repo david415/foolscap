@@ -4,6 +4,7 @@ import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
 from twisted.internet.error import ConnectionDone
+from twisted.internet.endpoints import clientFromString
 
 from foolscap import broker, referenceable, vocab
 from foolscap.eventual import eventually
@@ -1311,19 +1312,15 @@ class TubConnector(object):
         self.tub = parent
         self.target = tubref
         hints = []
-        # filter out the hints that we can actually use.. there may be
-        # extensions from the future sitting in this list
-        for h in self.target.getLocations():
-            if h[0] == "tcp":
-                (host, port) = h[1:]
-                hints.append( (host, port) )
-        self.remainingLocations = hints
+
+        self.remainingEndpoints = map(lambda x:"%s:%s:%s" % x, self.target.getLocations())
+
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
-        self.attemptedLocations = []
+        self.attemptedEndpoints = []
 
-        # pendingConnections contains a (PBClientFactory -> Connector) map
-        # for pairs where connectTCP has started, but negotiation has not yet
+        # pendingConnections contains a (PBClientFactory -> connect Deferred) map
+        # for pairs where endpoint.connect has started, but negotiation has not yet
         # completed. We keep track of these so we can shut them down when we
         # stop connecting (either because one of the connections succeeded,
         # or because someone told us to give up).
@@ -1346,7 +1343,7 @@ class TubConnector(object):
         the parent Tub's brokerAttached() method, our us calling the Tub's
         connectionFailed() method."""
         self.tub.connectorStarted(self)
-        if not self.remainingLocations:
+        if not self.remainingEndpoints:
             # well, that's going to make it difficult. connectToAll() will
             # pass through to checkForFailure(), which will notice our lack
             # of options and deliver this failureReason to the caller.
@@ -1364,30 +1361,29 @@ class TubConnector(object):
 
     def shutdown(self):
         self.active = False
-        self.remainingLocations = []
+        # XXX
+        self.remainingEndpoints = []
+
         self.stopConnectionTimer()
         for c in self.pendingConnections.values():
-            c.disconnect()
-        # as each disconnect() finishes, it will either trigger our
-        # clientConnectionFailed or our negotiationFailed methods, both of
-        # which will trigger checkForIdle, and the last such message will
-        # invoke self.tub.connectorFinished()
+            # XXX call cancel instead of disconnect on the deferred
+            c.cancel()
 
     def connectToAll(self):
-        while self.remainingLocations:
-            location = self.remainingLocations.pop()
-            if location in self.attemptedLocations:
+        while self.remainingEndpoints:
+            endpointDesc = self.remainingEndpoints.pop()
+
+            if endpointDesc in self.attemptedEndpoints:
                 continue
-            self.attemptedLocations.append(location)
-            host, port = location
-            lp = self.log("connectTCP to %s" % (location,))
-            f = TubConnectorClientFactory(self, host, lp)
-            c = reactor.connectTCP(host, port, f)
-            self.pendingConnections[f] = c
-            # the tcp.Connector that we get back from reactor.connectTCP will
-            # retain a reference to the transport that it creates, so we can
-            # use it to disconnect the established (but not yet negotiated)
-            # connection
+            self.attemptedEndpoints.append(endpointDesc)
+
+            host     = endpointDesc.split(':')[1]
+            lp       = self.log("connectTCP to %s" % (endpointDesc,))
+            f        = TubConnectorClientFactory(self, host, lp)
+            endpoint = clientFromString(reactor, endpointDesc)
+
+            self.pendingConnections[f] = endpoint.connect(f)
+
             if self.tub.options.get("debug_stall_second_connection"):
                 # for unit tests, hold off on making the second connection
                 # for a moment. This allows the first connection to get to a
@@ -1416,7 +1412,7 @@ class TubConnector(object):
         # the redirected connection will disconnect soon, which will trigger
         # negotiationFailed(), so we don't have to do a
         # del self.pendingConnections[factory]
-        self.remainingLocations.append(newLocation)
+        self.remainingEndpoints.append("%s:%s:%s" % newLocation)
         self.connectToAll()
 
     def negotiationFailed(self, factory, reason):
@@ -1454,7 +1450,7 @@ class TubConnector(object):
     def checkForFailure(self):
         if not self.active:
             return
-        if self.remainingLocations:
+        if self.remainingEndpoints:
             return
         if self.pendingConnections:
             return
@@ -1484,7 +1480,7 @@ class TubConnector(object):
         self.tub.connectorFinished(self)
 
     def checkForIdle(self):
-        if self.remainingLocations:
+        if self.remainingEndpoints:
             return
         if self.pendingConnections:
             return

@@ -816,13 +816,9 @@ def decode_location_hints(hints_s):
                 hints.append(hint)
             else:
                 pieces = hint_s.split(':')
-                if pieces[0] == 'tcp':
-                    fields = dict([f.split("=") for f in pieces[1:]])
-                    hint = ("tcp", fields["host"], int(fields["port"]))
-                    hints.append(hint)
-                else:
-                    # Ignore other things from the future.
-                    pass
+                fields = dict([f.split("=") for f in pieces])
+                hint = (fields["type"], fields["host"], int(fields["port"]))
+                hints.append(hint)
     return hints
 
 def decode_furl(furl):
