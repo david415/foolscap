@@ -1,5 +1,5 @@
 # -*- test-case-name: foolscap.test.test_negotiate -*-
-
+import q
 import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
@@ -1317,6 +1317,7 @@ class TubConnector(object):
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
         self.attemptedEndpoints = []
+        self.invalidEndpoints   = []
 
         # pendingConnections contains a (PBClientFactory -> connect Deferred) map
         # for pairs where endpoint.connect has started, but negotiation has not yet
@@ -1371,16 +1372,22 @@ class TubConnector(object):
     def connectToAll(self):
         while self.remainingEndpoints:
             endpointDesc = self.remainingEndpoints.pop()
-
             if endpointDesc in self.attemptedEndpoints:
                 continue
             self.attemptedEndpoints.append(endpointDesc)
 
             lp       = self.log("connectTCP to %s" % (endpointDesc,))
-            f        = TubConnectorClientFactory(self, endpointDesc, lp)
-            endpoint = clientFromString(reactor, endpointDesc)
 
-            self.pendingConnections[f] = endpoint.connect(f)
+            try:
+                endpoint = clientFromString(reactor, endpointDesc)
+            except ValueError:
+                self.log("%s is not a valid endpoint descriptor" % endpointDesc)
+                self.invalidEndpoints.append(endpointDesc)
+                continue
+            host     = endpoint._host
+            f        = TubConnectorClientFactory(self, host, lp)
+            c = endpoint.connect(f)
+            self.pendingConnections[f] = c
 
             if self.tub.options.get("debug_stall_second_connection"):
                 # for unit tests, hold off on making the second connection
@@ -1388,6 +1395,7 @@ class TubConnector(object):
                 # known state.
                 reactor.callLater(0.1, self.connectToAll)
                 return
+
         self.checkForFailure()
 
     def connectionTimedOut(self):
@@ -1410,7 +1418,7 @@ class TubConnector(object):
         # the redirected connection will disconnect soon, which will trigger
         # negotiationFailed(), so we don't have to do a
         # del self.pendingConnections[factory]
-        self.remainingEndpoints.append("%s:%s:%s" % newLocation)
+        self.remainingEndpoints.append(newLocation)
         self.connectToAll()
 
     def negotiationFailed(self, factory, reason):
@@ -1451,6 +1459,11 @@ class TubConnector(object):
         if self.remainingEndpoints:
             return
         if self.pendingConnections:
+            return
+        if self.attemptedEndpoints <= self.invalidEndpoints:
+            self.log("TubConnector: no valid endpoint descriptors")
+            self.failed()
+        if self.failureReason is None:
             return
         # we have no more options, so the connection attempt will fail. The
         # getBrokerForTubRef may have succeeded, however, if the other side
