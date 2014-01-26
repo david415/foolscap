@@ -782,27 +782,11 @@ DNS_NAME_RESTR=r"[A-Za-z.0-9\-]+"
 OLD_STYLE_HINT_RE=re.compile(r"^(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR,
                                                         DNS_NAME_RESTR))
 
-def encode_location_hint(hint):
-    assert hint[0] == "tcp"
-    host, port = hint[1:]
-    return "%s:%d" % (host, port)
-
-# Each location hint must start with "TYPE:" (where TYPE is alphanumeric) and
-# then can contain any characters except "," and "/". These are expected to
-# look like Twisted endpoin descriptors, or contain other ":"-separated
-# fields (e.g. "TYPE:key=value:key=value" or "TYPE:stuff:morestuff"). We also
-# accept old-syle implicit TCP hints (host:port). To avoid being interpreted
-# as an old-style hint, the part after TYPE: may not consist of only 1-5
-# digits (so "type:123" will be treated as type="tcp" and hostname="type").
-
-# Future versions of foolscap may put hints in their FURLs which we do not
-# understand. We will ignore such hints. This version understands two types
-# of hints:
-#
-#  HOST:PORT                 (implicit tcp)
-#  tcp:host=HOST:port=POST   (endpoint syntax for TCP connections)
-
-def decode_location_hints(hints_s):
+# This function returns a list of twisted endpoint descriptors given
+# a comma seperated list of connections hints. This function will
+# convert old style connection hints into twisted tcp endpoint
+# descriptors.
+def convert_old_location_hints(hints_s):
     hints = []
     if hints_s:
         for hint_s in hints_s.split(","):
@@ -812,17 +796,8 @@ def decode_location_hints(hints_s):
 
             mo = OLD_STYLE_HINT_RE.search(hint_s)
             if mo:
-                hint = ( "tcp", mo.group(1), int(mo.group(2)) )
-                hints.append(hint)
-            else:
-                pieces = hint_s.split(':')
-                if pieces[0] == 'tcp':
-                    fields = dict([f.split("=") for f in pieces[1:]])
-                    hint = ("tcp", fields["host"], int(fields["port"]))
-                    hints.append(hint)
-                else:
-                    # Ignore other things from the future.
-                    pass
+                hint_s = "tcp:%s:%s" % ( mo.group(1), mo.group(2) )
+            hints.append(hint_s)
     return hints
 
 def decode_furl(furl):
@@ -847,14 +822,14 @@ def decode_furl(furl):
         if not base32.is_base32(tubID):
             raise BadFURLError("'%s' is not a valid tubid" % (tubID,))
         hints = mo_auth_furl.group(2)
-        location_hints = decode_location_hints(hints)
+        location_hints = convert_old_location_hints(hints)
         name = mo_auth_furl.group(3)
 
     elif mo_nonauth_furl:
         encrypted = False
         tubID = None
         hints = mo_nonauth_furl.group(1)
-        location_hints = decode_location_hints(hints)
+        location_hints = convert_old_location_hints(hints)
         name = mo_nonauth_furl.group(2)
 
     else:
@@ -862,8 +837,7 @@ def decode_furl(furl):
     return (encrypted, tubID, location_hints, name)
 
 def encode_furl(encrypted, tubID, location_hints, name):
-    location_hints_s = ",".join([encode_location_hint(hint)
-                                 for hint in location_hints])
+    location_hints_s = ",".join(location_hints)
     if encrypted:
         return "pb://" + tubID + "@" + location_hints_s + "/" + name
     else:
@@ -890,7 +864,7 @@ class SturdyRef(Copyable, RemoteCopy):
     name = None
 
     def __init__(self, url=None):
-        self.locationHints = [] # list of (type, host, port) tuples
+        self.locationHints = [] # list of endpoint descriptor strings
         self.url = url
         if url:
             self.encrypted, self.tubID, self.locationHints, self.name = \
@@ -974,8 +948,7 @@ class NoAuthTubRef(TubRef):
         return "<unauth>"
 
     def __str__(self):
-        return "pbu://" + ",".join([encode_location_hint(location)
-                                    for location in self.locations])
+        return "pbu://" + ",".join(self.locations)
 
     def _distinguishers(self):
         """This serves the same purpose as SturdyRef._distinguishers."""
