@@ -1,4 +1,3 @@
-import q
 # -*- test-case-name: foolscap.test.test_negotiate -*-
 
 import time
@@ -1387,8 +1386,6 @@ class TubConnector(object):
         # XXX how is the hostname used here?
         tubFactory = TubConnectorClientFactory(self, host, lp)
         endpoint   = TCP4ClientEndpoint(reactor, host, port)
-
-        q(endpoint)
 
         # XXX is this correct?
         connect_deferred = endpoint.connect(tubFactory)
