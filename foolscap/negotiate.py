@@ -4,6 +4,7 @@ import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
 from twisted.internet.error import ConnectionDone
+from twisted.internet.endpoints import clientFromString
 
 from foolscap import broker, referenceable, vocab
 from foolscap.eventual import eventually
