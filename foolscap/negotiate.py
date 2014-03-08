@@ -1,5 +1,4 @@
 # -*- test-case-name: foolscap.test.test_negotiate -*-
-
 import time
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
@@ -1275,6 +1274,8 @@ class TubConnectorFactory(protocol.Factory, object):
         proto.factory = self
         return proto
 
+    # XXX this will not get called by the newer twisted interfaces
+    # so how to fix?
     def clientConnectionFailed(self, connector, reason):
         self.tc.clientConnectionFailed(self, reason)
 
@@ -1379,7 +1380,10 @@ class TubConnector(object):
             lp = self.log("connectTCP to %s" % (endpointDesc,))
             f = TubConnectorFactory(self, lp)
             endpoint = clientFromString(reactor, endpointDesc)
-            self.pendingConnections[f] = endpoint.connect(f)
+            d        = endpoint.connect(f)
+            d.addErrback(self.clientConnectionFailed)
+            self.pendingConnections[f] = d
+
             # the connect deferred that we save can be used to disconnect the
             # established (but not yet negotiated) connections
             if self.tub.options.get("debug_stall_second_connection"):
@@ -1388,6 +1392,7 @@ class TubConnector(object):
                 # known state.
                 reactor.callLater(0.1, self.connectToAll)
                 return
+
         self.checkForFailure()
 
     def connectionTimedOut(self):
@@ -1397,6 +1402,7 @@ class TubConnector(object):
         self.shutdown()
         self.failed()
 
+    # XXX hopefully this'll get called by the deferred's errback
     def clientConnectionFailed(self, factory, reason):
         # this is called if some individual TCP connection cannot be
         # established
