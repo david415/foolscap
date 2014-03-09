@@ -580,6 +580,8 @@ class RunCommand(unittest.TestCase, RequiresCryptoBase, StallMixin):
 
     def stash_furl(self, furl, which):
         self.furls[which] = furl
+        print "\n == HALLO ==\n", furl, which
+
 
     def test_run(self):
         basedir = "appserver/RunCommand/run"

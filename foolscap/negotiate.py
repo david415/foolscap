@@ -1382,16 +1382,17 @@ class TubConnector(object):
             endpoint = clientFromString(reactor, endpointDesc)
             d        = endpoint.connect(f)
             d.addErrback(self.clientConnectionFailed)
+            d.callBack(self.negotiationComplete)
             self.pendingConnections[f] = d
 
             # the connect deferred that we save can be used to disconnect the
             # established (but not yet negotiated) connections
-            if self.tub.options.get("debug_stall_second_connection"):
+            #if self.tub.options.get("debug_stall_second_connection"):
                 # for unit tests, hold off on making the second connection
                 # for a moment. This allows the first connection to get to a
                 # known state.
-                reactor.callLater(0.1, self.connectToAll)
-                return
+                #reactor.callLater(0.1, self.connectToAll)
+                #return
 
         self.checkForFailure()
 
@@ -1450,7 +1451,7 @@ class TubConnector(object):
             # loseConnection() and will thus trigger negotiationFailed.
 
             # XXX
-            f.cancel()
+            f.disconnect()
         self.checkForIdle()
 
     def checkForFailure(self):
