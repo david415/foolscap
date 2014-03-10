@@ -11,7 +11,8 @@ from foolscap.referenceable import RemoteReference
 from foolscap.eventual import eventually, fireEventually, flushEventualQueue
 from foolscap.test.common import HelperTarget, TargetMixin, ShouldFailMixin, \
      crypto_available, GoodEnoughTub, StallMixin
-from foolscap.tokens import WrongTubIdError, PBError, NoLocationHintsError
+from foolscap.tokens import WrongTubIdError, PBError, NoLocationHintsError, \
+    InvalidEndpointDescriptorError
 
 # create this data with:
 #  t = Tub()
@@ -108,8 +109,10 @@ class SetLocation(unittest.TestCase):
             if sr.encrypted:
                 for lh in sr.locationHints:
                     self.failUnlessEqual(lh[2], portnum, lh)
+                # XXX - test for backwards compatibility
                 self.failUnless( ("tcp", "127.0.0.1", portnum)
                                  in sr.locationHints)
+                self.failUnless( "tcp:host=127.0.0.1:port=%d" % portnum in sr.endpointDescriptors)
             else:
                 # TODO: unauthenticated tubs need review, I think they
                 # deserve to have tubids and multiple connection hints
@@ -450,9 +453,6 @@ class BadLocationFURL(unittest.TestCase):
         return d
 
     def test_future(self):
-        # bug #129: a FURL with no location hints causes a synchronous
-        # exception in Tub.getReference(), instead of an errback'ed Deferred.
-
         tubA = GoodEnoughTub()
         tubA.setServiceParent(self.s)
         tubB = GoodEnoughTub()
@@ -470,6 +470,6 @@ class BadLocationFURL(unittest.TestCase):
         self.failUnless(isinstance(d, defer.Deferred))
         def _check(f):
             self.failUnless(isinstance(f, failure.Failure), f)
-            self.failUnless(f.check(NoLocationHintsError), f)
+            self.failUnless(f.check(InvalidEndpointDescriptorError), f)
         d.addBoth(_check)
         return d

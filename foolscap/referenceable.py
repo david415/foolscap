@@ -365,8 +365,12 @@ class RemoteReferenceOnly(object):
     def isConnected(self):
         """Return False if this reference is known to be dead."""
         return not self.tracker.broker.disconnected
+
     def getLocationHints(self):
         return SturdyRef(self.tracker.url).locationHints
+
+    def getEndpointDescriptors(self):
+        return SturdyRef(self.tracker.url).endpointDescriptors
 
     def getDataLastReceivedAt(self):
         """If keepalives are enabled, this returns seconds-since-epoch when
@@ -778,14 +782,9 @@ NONAUTH_STURDYREF_RE = re.compile(r"pbu://([^/]*)/(.+)$")
 DOTTED_QUAD_RESTR=r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
 
 DNS_NAME_RESTR=r"[A-Za-z.0-9\-]+"
-
+NEW_STYLE_HINT_RE=re.compile(r"^([A-Za-z.0-9\-]+):(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR, DNS_NAME_RESTR))
 OLD_STYLE_HINT_RE=re.compile(r"^(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR,
                                                         DNS_NAME_RESTR))
-
-def encode_location_hint(hint):
-    assert hint[0] == "tcp"
-    host, port = hint[1:]
-    return "%s:%d" % (host, port)
 
 # Each location hint must start with "TYPE:" (where TYPE is alphanumeric) and
 # then can contain any characters except "," and "/". These are expected to
@@ -799,8 +798,8 @@ def encode_location_hint(hint):
 # understand. We will ignore such hints. This version understands two types
 # of hints:
 #
-#  HOST:PORT                 (implicit tcp)
-#  tcp:host=HOST:port=POST   (endpoint syntax for TCP connections)
+# HOST:PORT (implicit tcp)
+# tcp:host=HOST:port=POST (endpoint syntax for TCP connections)
 
 def decode_location_hints(hints_s):
     hints = []
@@ -824,6 +823,28 @@ def decode_location_hints(hints_s):
                     # Ignore other things from the future.
                     pass
     return hints
+
+# receive a string containing a comma separated
+# list of hints; convert to list of endpoint descriptors
+def convert_location_hints_string(hints_s):
+    endpoint_descriptors = []
+    if hints_s is None or hints_s == '':
+        return []
+
+    for hint in hints_s.split(','):
+        if hint == '':
+            raise BadFURLError("bad connection hint '%s' "
+                               "(empty string)" % hint)
+        mo_new = NEW_STYLE_HINT_RE.search(hint)
+        mo_old = OLD_STYLE_HINT_RE.search(hint)
+        if mo_new:
+            endpointDesc = "%s:host=%s:port=%s" % ( mo_new.group(1), mo_new.group(2), mo_new.group(3) )
+        elif mo_old:
+            endpointDesc = "tcp:host=%s:port=%s" % ( mo_old.group(1), mo_old.group(2) )
+        else:
+            endpointDesc = hint
+        endpoint_descriptors.append( str(endpointDesc) )
+    return endpoint_descriptors
 
 def decode_furl(furl):
     """Returns (encrypted, tubID, location_hints, name)"""
@@ -861,6 +882,44 @@ def decode_furl(furl):
         raise ValueError("unknown FURL prefix in %r" % (furl,))
     return (encrypted, tubID, location_hints, name)
 
+def decode_furl_endpoints(furl):
+    """Returns (encrypted, tubID, endpoint_descriptors, name)"""
+    mo_auth_furl = AUTH_STURDYREF_RE.search(furl)
+    mo_nonauth_furl = NONAUTH_STURDYREF_RE.search(furl)
+    if mo_auth_furl:
+        encrypted = True
+        # we only pay attention to the first 32 base32 characters
+        # of the tubid string. Everything else is left for future
+        # extensions.
+        tubID_s = mo_auth_furl.group(1)
+        tubID = tubID_s[:32]
+        if not base32.is_base32(tubID):
+            raise BadFURLError("'%s' is not a valid tubid" % (tubID,))
+        endpoint_descriptors = convert_location_hints_string(mo_auth_furl.group(2))
+        name = mo_auth_furl.group(3)
+
+    elif mo_nonauth_furl:
+        encrypted = False
+        tubID = None
+        endpoint_descriptors = convert_location_hints_string(mo_nonauth_furl.group(1))
+        name = mo_nonauth_furl.group(2)
+
+    else:
+        raise ValueError("unknown FURL prefix in %r" % (furl,))
+    return (encrypted, tubID, endpoint_descriptors, name)
+
+def encode_furl_endpoints(encrypted, tubID, endpoint_descriptors, name):
+    endpoint_descriptors_s = ",".join(endpoint_descriptors)
+    if encrypted:
+        return "pb://" + tubID + "@" + endpoint_descriptors_s + "/" + name
+    else:
+        # XXX - check to make sure there is only one endpoint descriptor?
+        return "pbu://" + endpoint_descriptors_s + "/" + name
+
+def encode_location_hint(hint):
+    host, port = hint[1:]
+    return "%s:%d" % (host, port)
+
 def encode_furl(encrypted, tubID, location_hints, name):
     location_hints_s = ",".join([encode_location_hint(hint)
                                  for hint in location_hints])
@@ -869,6 +928,38 @@ def encode_furl(encrypted, tubID, location_hints, name):
     else:
         return "pbu://" + location_hints + "/" + name
 
+def convert_endpoints_to_hints(endpoints):
+    hints = []
+    for endpoint in endpoints:
+        mo_new = NEW_STYLE_HINT_RE.search(endpoint)
+        mo_old = OLD_STYLE_HINT_RE.search(endpoint)
+        hint = None
+        if mo_new:
+            # XXX
+            if mo_new.group(1) == 'tcp':
+                hint = ( 'tcp', mo_new.group(2), mo_new.group(3) )
+        elif mo_old:
+            hint = ( 'tcp',  mo_old.group(1), mo_old.group(2) )
+        else:
+            pieces = endpoint.split(':')
+            # XXX
+            if pieces[0] == 'tcp':
+                fields = dict([f.split("=") for f in pieces[1:]])
+                hint = ("tcp", fields["host"], int(fields["port"]))
+            else:
+                # XXX
+                # Ignore other things from the future.
+                pass
+        if hint:
+            hints.append( hint )
+    return hints
+
+def convert_hints_to_endpoints(hints):
+    endpoints = []
+    if hints is not None:
+        for hint in hints:
+            endpoints.append("%s:%s:%s" % hints)
+    return endpoints
 
 class SturdyRef(Copyable, RemoteCopy):
     """I am a pointer to a Referenceable that lives in some (probably remote)
@@ -890,16 +981,19 @@ class SturdyRef(Copyable, RemoteCopy):
     name = None
 
     def __init__(self, url=None):
+        self.endpointDescriptors = [] # list of twisted endpoint descriptor strings
         self.locationHints = [] # list of (type, host, port) tuples
         self.url = url
         if url:
-            self.encrypted, self.tubID, self.locationHints, self.name = \
-                decode_furl(url)
+            self.encrypted, self.tubID, self.endpointDescriptors, self.name = \
+                decode_furl_endpoints(url)
+            # XXX - compatibility
+            self.locationHints = convert_endpoints_to_hints(self.endpointDescriptors)
 
     def getTubRef(self):
         if self.encrypted:
-            return TubRef(self.tubID, self.locationHints)
-        return NoAuthTubRef(self.locationHints)
+            return TubRef(self.tubID, endpointDescriptors=self.endpointDescriptors)
+        return NoAuthTubRef(endpointDescriptors=self.endpointDescriptors)
 
 
     def getURL(self):
@@ -932,12 +1026,25 @@ class TubRef(object):
     connections to remote Tubs."""
     encrypted = True
 
-    def __init__(self, tubID, locationHints=None):
+    def __init__(self, tubID, locationHints=None, endpointDescriptors=None):
         self.tubID = tubID
-        self.locationHints = locationHints
+        self.locationHints = None
+        self.endpointDescriptors = None
+        if endpointDescriptors is not None:
+            assert locationHints is None
+            self.endpointDescriptors = endpointDescriptors
+            # XXX - compatibility
+            self.locationHints       = convert_endpoints_to_hints(self.endpointDescriptors)
+        else:
+            # XXX - compatibility
+            self.locationHints       = locationHints
+            self.endpointDescriptors = convert_hints_to_endpoints(locationHints)
 
     def getLocations(self):
         return self.locationHints
+
+    def getEndpointDescriptors(self):
+        return self.endpointDescriptors
 
     def getTubID(self):
         return self.tubID
@@ -962,11 +1069,27 @@ class NoAuthTubRef(TubRef):
     # this is only used on outbound connections
     encrypted = False
 
-    def __init__(self, locations):
-        self.locations = locations
+    def __init__(self, locations=None, endpointDescriptors=None):
+        if endpointDescriptors:
+            assert locations is None
+            self.endpointDescriptors = endpointDescriptors
+            # XXX - compatibility
+            locations = convert_endpoints_to_hints(endpointDescriptors)
+            assert len(locations) == 1
+            self.locations = locations[0]
+        else:
+            # XXX - compatibility
+            assert len(locations) == 1
+            self.locations = locations[0]
+            endpoint_descriptors = convert_hints_to_endpoints(locations)
+            assert len(endpoint_descriptors) == 1
+            self.endpointDescriptor = endpoint_descriptors[0]
 
     def getLocations(self):
         return self.locations
+
+    def getEndpointDescriptors(self):
+        return self.endpointDescriptors
 
     def getTubID(self):
         return "<unauth>"
@@ -974,9 +1097,8 @@ class NoAuthTubRef(TubRef):
         return "<unauth>"
 
     def __str__(self):
-        return "pbu://" + ",".join([encode_location_hint(location)
-                                    for location in self.locations])
+        return "pbu://" + ",".join(self.endpointDescriptors)
 
     def _distinguishers(self):
         """This serves the same purpose as SturdyRef._distinguishers."""
-        return tuple(self.locations)
+        return str(self.endpointDescriptors)
