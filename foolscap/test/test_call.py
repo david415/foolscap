@@ -758,7 +758,7 @@ class TubFailures(ExamineFailuresMixin, ShouldFailMixin, unittest.TestCase):
         self.target_tub = UnauthenticatedTub()
         self.target_tub.setServiceParent(self.s)
         l = self.target_tub.listenOn("tcp:0:interface=127.0.0.1")
-        self.target_tub.setLocation("127.0.0.1:%d" % l.getPortnum())
+        self.target_tub.setLocation("tcp:host=127.0.0.1:port=%d" % l.getPortnum())
         self.source_tub = UnauthenticatedTub()
         self.source_tub.setServiceParent(self.s)
 
@@ -806,7 +806,7 @@ class ReferenceCounting(ShouldFailMixin, unittest.TestCase):
         self.target_tub = UnauthenticatedTub()
         self.target_tub.setServiceParent(self.s)
         l = self.target_tub.listenOn("tcp:0:interface=127.0.0.1")
-        self.target_tub.setLocation("127.0.0.1:%d" % l.getPortnum())
+        self.target_tub.setLocation("tcp:host=127.0.0.1:port=%d" % l.getPortnum())
         self.source_tub = UnauthenticatedTub()
         self.source_tub.setServiceParent(self.s)
 

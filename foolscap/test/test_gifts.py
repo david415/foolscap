@@ -477,7 +477,7 @@ class Bad(Base, unittest.TestCase):
             # connection timeout.
             (encrypted, tubid, location_hints, name) = \
                 decode_furl(adave.tracker.url)
-            location_hints = [ "tcp:host=127.0.0.1:port=" + p.getHost().port ]
+            location_hints = [ "tcp:host=127.0.0.1:port=%s" % (p.getHost().port,) ]
             adave.tracker.url = encode_furl(encode_furl, tubid,
                                             location_hints, name)
             self.tubD.options['connect_timeout'] = 2
