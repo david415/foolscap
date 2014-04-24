@@ -808,6 +808,8 @@ def convert_old_location_hints(hints_s):
             if mo:
                 hint_s = "tcp:host=%s:port=%s" % ( mo.group(1), mo.group(2) )
             hints.append(hint_s)
+
+    print "convert_old_location_hints %s" % (hints,)
     return hints
 
 def decode_furl(furl):
@@ -827,8 +829,10 @@ def decode_furl(furl):
         # we only pay attention to the first 32 base32 characters
         # of the tubid string. Everything else is left for future
         # extensions.
+
         tubID_s = mo_auth_furl.group(1)
         tubID = tubID_s[:32]
+
         if not base32.is_base32(tubID):
             raise BadFURLError("'%s' is not a valid tubid" % (tubID,))
         hints = mo_auth_furl.group(2)
@@ -844,6 +848,7 @@ def decode_furl(furl):
 
     else:
         raise ValueError("unknown FURL prefix in %r" % (furl,))
+    print "decode_furl: %s" % ((encrypted, tubID, location_hints, name),)
     return (encrypted, tubID, location_hints, name)
 
 def encode_furl(encrypted, tubID, location_hints, name):
@@ -851,7 +856,7 @@ def encode_furl(encrypted, tubID, location_hints, name):
     if encrypted:
         return "pb://" + tubID + "@" + location_hints_s + "/" + name
     else:
-        return "pbu://" + location_hints + "/" + name
+        return "pbu://" + location_hints_s + "/" + name
 
 
 class SturdyRef(Copyable, RemoteCopy):
@@ -880,6 +885,8 @@ class SturdyRef(Copyable, RemoteCopy):
             self.encrypted, self.tubID, self.locationHints, self.name = \
                 decode_furl(url)
 
+        print "SturdyRef: __init__: url %s" % (url)
+
     def getTubRef(self):
         if self.encrypted:
             return TubRef(self.tubID, self.locationHints)
@@ -899,8 +906,11 @@ class SturdyRef(Copyable, RemoteCopy):
         location hints instead of the (missing) TubID. This method makes it
         easier to compare a pair of SturdyRefs."""
         if self.encrypted:
+            print "SturdyRef._distinguishers: (%s, %s, %s)" % (True, self.tubID, self.name)
             return (True, self.tubID, self.name)
+        print "SturdyRef._distinguishers: (%s, %s, %s)" % (True, self.tubID, self.name)
         return (False, self.locationHints, self.name)
+
 
     def __hash__(self):
         return hash(self._distinguishers())
@@ -919,6 +929,7 @@ class TubRef(object):
     def __init__(self, tubID, locationHints=None):
         self.tubID = tubID
         self.locationHints = locationHints
+        print "TubRef: __init__: tubID %s locationHints %s" % (tubID, locationsHints)
 
     def getLocations(self):
         return self.locationHints
@@ -933,6 +944,7 @@ class TubRef(object):
 
     def _distinguishers(self):
         """This serves the same purpose as SturdyRef._distinguishers."""
+        print "TubRef._distinguishers: (%s)" % (self.tubID,)
         return (self.tubID,)
 
     def __hash__(self):
@@ -949,6 +961,9 @@ class NoAuthTubRef(TubRef):
     def __init__(self, locations):
         self.locations = locations
 
+        print "NoAuthTubRef.__init__: self.locations: %s" % (self.locations,)
+
+
     def getLocations(self):
         return self.locations
 
@@ -962,4 +977,6 @@ class NoAuthTubRef(TubRef):
 
     def _distinguishers(self):
         """This serves the same purpose as SturdyRef._distinguishers."""
+        print "NoAuthTubRef._distinguishers: (%s)" % (tuple(self.locations),)
+        #assert len(self.locations) > 0
         return tuple(self.locations)

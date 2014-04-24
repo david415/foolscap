@@ -488,6 +488,7 @@ class Tub(service.MultiService):
         return self.myCertificate.dumpPEM()
 
     def setLocation(self, *hints):
+        print "setLocation: hints = %s" % (hints,)
         """Tell this service what its location is: a host:port description of
         how to reach it from the outside world. You need to use this because
         the Tub can't do it without help. If you do a
