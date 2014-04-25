@@ -8,7 +8,7 @@ from twisted.python.failure import Failure
 
 from foolscap import ipb, base32, negotiate, broker, observer, eventual, storage
 from foolscap import util
-from foolscap.referenceable import SturdyRef
+from foolscap.referenceable import SturdyRef, convert_old_location_hints
 from foolscap.tokens import PBError, BananaError, WrongTubIdError, \
      WrongNameError, NoLocationError
 from foolscap.reconnector import Reconnector
@@ -506,7 +506,11 @@ class Tub(service.MultiService):
                           "location hint")
         if self.locationHints:
             raise PBError("Tub.setLocation() can only be called once")
-        self.locationHints = hints
+
+        self.locationHints = []
+        for hint_str in hints:
+            self.locationHints += convert_old_location_hints(hint_str)
+
         self._maybeCreateLogPortFURLFile()
         self._maybeConnectToGatherer()
 

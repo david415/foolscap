@@ -1272,7 +1272,6 @@ class TubConnectorFactory(protocol.Factory, object):
     def disconnect(self):
         self.proto.transport.loseConnection()
 
-
 class TubConnector(object):
     """I am used to make an outbound connection. I am given a target TubID
     and a list of locationHints, and I try all of them until I establish a
@@ -1305,16 +1304,11 @@ class TubConnector(object):
         self.tub = parent
         self.target = tubref
         hints = []
-        # filter out the hints that we can actually use.. there may be
-        # extensions from the future sitting in this list
-        for h in self.target.getLocations():
-            if h[0] == "tcp":
-                (host, port) = h[1:]
-                hints.append( (host, port) )
-        self.remainingLocations = hints
+        self.remainingEndpoints = self.target.getLocations()
+
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
-        self.attemptedLocations = []
+        self.attemptedEndpoints = []
 
         # pendingConnections contains a (PBClientFactory -> Connector) map
         # for pairs where connectTCP has started, but negotiation has not yet
@@ -1340,7 +1334,7 @@ class TubConnector(object):
         the parent Tub's brokerAttached() method, our us calling the Tub's
         connectionFailed() method."""
         self.tub.connectorStarted(self)
-        if not self.remainingLocations:
+        if not self.remainingEndpoints:
             # well, that's going to make it difficult. connectToAll() will
             # pass through to checkForFailure(), which will notice our lack
             # of options and deliver this failureReason to the caller.
@@ -1358,7 +1352,7 @@ class TubConnector(object):
 
     def shutdown(self):
         self.active = False
-        self.remainingLocations = []
+        self.remainingEndpoints = []
         self.stopConnectionTimer()
         for factory, connectDeferred in self.pendingConnections.items():
             connectDeferred.cancel()
@@ -1370,18 +1364,15 @@ class TubConnector(object):
                 factory.disconnect()
 
     def connectToAll(self):
-        while self.remainingLocations:
-            location = self.remainingLocations.pop()
-            if location in self.attemptedLocations:
+        while self.remainingEndpoints:
+            endpointDesc = self.remainingEndpoints.pop()
+            if endpointDesc in self.attemptedEndpoints:
                 continue
-            self.attemptedLocations.append(location)
-            host, port = location
-            lp = self.log("connect to %s" % (location,))
+            self.attemptedEndpoints.append(endpointDesc)
+            lp = self.log("connect to %s" % (endpointDesc,))
             f = TubConnectorFactory(self, lp)
 
-            endpointDesc = "tcp:host=%s:port=%s" % (host, port)
             endpoint = clientFromString(reactor, endpointDesc)
-
             connectDeferred = endpoint.connect(f)
             self.pendingConnections[f] = connectDeferred
             connectDeferred.addErrback(lambda r: self.clientConnectionFailed(f, r))
@@ -1414,7 +1405,7 @@ class TubConnector(object):
         # the redirected connection will disconnect soon, which will trigger
         # negotiationFailed(), so we don't have to do a
         # del self.pendingConnections[factory]
-        self.remainingLocations.append(newLocation)
+        self.remainingEndpoints.append(newLocation)
         self.connectToAll()
 
     def negotiationFailed(self, factory, reason):
@@ -1456,7 +1447,7 @@ class TubConnector(object):
     def checkForFailure(self):
         if not self.active:
             return
-        if self.remainingLocations:
+        if self.remainingEndpoints:
             return
         if self.pendingConnections:
             return
@@ -1486,7 +1477,7 @@ class TubConnector(object):
         self.tub.connectorFinished(self)
 
     def checkForIdle(self):
-        if self.remainingLocations:
+        if self.remainingEndpoints:
             return
         if self.pendingConnections:
             return
