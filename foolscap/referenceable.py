@@ -779,6 +779,8 @@ DOTTED_QUAD_RESTR=r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
 
 DNS_NAME_RESTR=r"[A-Za-z.0-9\-]+"
 
+NEW_STYLE_HINT_RE=re.compile(r"^([A-Za-z.0-9\-]+):(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR, DNS_NAME_RESTR))
+
 OLD_STYLE_HINT_RE=re.compile(r"^(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR,
                                                         DNS_NAME_RESTR))
 
@@ -796,19 +798,40 @@ OLD_STYLE_HINT_RE=re.compile(r"^(%s|%s):(\d+){1,5}$" % (DOTTED_QUAD_RESTR,
 #
 #  HOST:PORT                 (implicit tcp)
 #  tcp:host=HOST:port=POST   (endpoint syntax for TCP connections)
-def convert_old_location_hints(hints_s):
-    hints = []
-    if hints_s:
-        for hint_s in hints_s.split(","):
-            if hint_s == '':
-                raise BadFURLError("bad connection hint '%s' "
-                                   "(empty string)" % hint_s)
 
-            mo = OLD_STYLE_HINT_RE.search(hint_s)
-            if mo:
-                hint_s = "tcp:host=%s:port=%s" % ( mo.group(1), mo.group(2) )
-            hints.append(hint_s)
+
+def convert_old_location_hints_str(hints_s):
+    if hints_s == '':
+        return []
+    hints = []
+    for hint in hints_s.split(","):
+        hints.append(convert_old_location_hint(hint))
     return hints
+
+def convert_old_location_hints_list(hints_l):
+    hints = []
+    if hints_l:
+        for hint in hints_l:
+            hints.append(convert_old_location_hint(hint))
+    return hints
+
+def convert_old_location_hint(hint_s):
+    if hint_s is '':
+        raise BadFURLError("bad connection hint '%s' "
+                           "(empty string)" % hint_s)
+
+    mo_old = OLD_STYLE_HINT_RE.search(hint_s)
+    mo_new = NEW_STYLE_HINT_RE.search(hint_s)
+    if mo_old:
+        hint_s = "tcp:host=%s:port=%s" % ( mo_old.group(1), mo_old.group(2) )
+    elif mo_new:
+        hint_s = "%s:host=%s:port=%s" % ( mo_new.group(1), mo_new.group(2), mo_new.group(3) )
+    else:
+        # pass through without filtering
+        # or should we raise an exception!?
+        pass
+
+    return hint_s
 
 def decode_furl(furl):
     """Returns (encrypted, tubID, location_hints, name)"""
@@ -832,16 +855,15 @@ def decode_furl(furl):
         if not base32.is_base32(tubID):
             raise BadFURLError("'%s' is not a valid tubid" % (tubID,))
         hints = mo_auth_furl.group(2)
-        location_hints = convert_old_location_hints(hints)
+        location_hints = convert_old_location_hints_str(hints)
         name = mo_auth_furl.group(3)
 
     elif mo_nonauth_furl:
         encrypted = False
         tubID = None
         hints = mo_nonauth_furl.group(1)
-        location_hints = convert_old_location_hints(hints)
+        location_hints = convert_old_location_hints_str(hints)
         name = mo_nonauth_furl.group(2)
-
     else:
         raise ValueError("unknown FURL prefix in %r" % (furl,))
     return (encrypted, tubID, location_hints, name)
@@ -874,7 +896,7 @@ class SturdyRef(Copyable, RemoteCopy):
     name = None
 
     def __init__(self, url=None):
-        self.locationHints = [] # list of twisted endpoint strings
+        self.locationHints = [] # list of strings; twisted endpoint descriptors
         self.url = url
         if url:
             self.encrypted, self.tubID, self.locationHints, self.name = \
@@ -918,7 +940,7 @@ class TubRef(object):
 
     def __init__(self, tubID, locationHints=None):
         self.tubID = tubID
-        self.locationHints = locationHints
+        self.locationHints = convert_old_location_hints_list(locationHints)
 
     def getLocations(self):
         return self.locationHints
@@ -947,7 +969,7 @@ class NoAuthTubRef(TubRef):
     encrypted = False
 
     def __init__(self, locations):
-        self.locations = locations
+        self.locations = convert_old_location_hints_list(locations)
 
     def getLocations(self):
         return self.locations

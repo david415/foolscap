@@ -8,7 +8,7 @@ from twisted.python.failure import Failure
 
 from foolscap import ipb, base32, negotiate, broker, observer, eventual, storage
 from foolscap import util
-from foolscap.referenceable import SturdyRef, convert_old_location_hints
+from foolscap.referenceable import SturdyRef, convert_old_location_hints_str
 from foolscap.tokens import PBError, BananaError, WrongTubIdError, \
      WrongNameError, NoLocationError
 from foolscap.reconnector import Reconnector
@@ -507,9 +507,12 @@ class Tub(service.MultiService):
         if self.locationHints:
             raise PBError("Tub.setLocation() can only be called once")
 
+        # XXX
         self.locationHints = []
-        for hint_str in hints:
-            self.locationHints += convert_old_location_hints(hint_str)
+        for hint in hints:
+            if hint:
+                endpointDesc_list = convert_old_location_hints_str(hint)
+                self.locationHints += endpointDesc_list
 
         self._maybeCreateLogPortFURLFile()
         self._maybeConnectToGatherer()
@@ -676,9 +679,15 @@ class Tub(service.MultiService):
         if self.encrypted:
             # TODO: IPv6 dotted-quad addresses have colons, but need to have
             # host:port
-            hints = ",".join(self.locationHints)
+            if not self.locationHints:
+                hints = ''
+            else:
+                hints = ",".join(self.locationHints)
             return "pb://" + self.tubID + "@" + hints + "/" + name
-        return "pbu://" + self.locationHints[0] + "/" + name
+        if not self.locationHints:
+            return "pbu://" + "/" + name
+        else:
+            return "pbu://" + self.locationHints[0] + "/" + name
 
     def registerReference(self, ref, name=None, furlFile=None):
         """Make a Referenceable available to the outside world. A URL is

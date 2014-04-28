@@ -436,7 +436,7 @@ class TestCallable(unittest.TestCase):
             self.failUnlessEqual(rref.getRemoteTubID(), self.tubB.getTubID())
             self.failUnlessEqual(rref.isConnected(), True)
             self.failUnlessEqual(rref.getLocationHints(),
-                                 [('tcp', '127.0.0.1', self.tub_ports[1])])
+                                 ["tcp:host=127.0.0.1:port=%s" % self.tub_ports[1]])
         d.addCallback(_check)
         return d
 
@@ -568,11 +568,11 @@ class TestService(unittest.TestCase):
         public_url = s.registerReference(t1, "target")
         if crypto_available:
             self.failUnless(public_url.startswith("pb://"))
-            self.failUnless(public_url.endswith("@127.0.0.1:%d/target"
+            self.failUnless(public_url.endswith("@tcp:host=127.0.0.1:port=%d/target"
                                                 % l.getPortnum()))
         else:
             self.failUnlessEqual(public_url,
-                                 "pbu://127.0.0.1:%d/target"
+                                 "pbu://tcp:host=127.0.0.1:port=%d/target"
                                  % l.getPortnum())
         self.failUnlessEqual(s.registerReference(t1, "target"), public_url)
         self.failUnlessIdentical(s.getReferenceForURL(public_url), t1)
