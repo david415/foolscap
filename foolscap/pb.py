@@ -2,7 +2,8 @@
 
 import os.path, weakref, binascii, re
 from zope.interface import implements
-from twisted.internet import defer, protocol, error
+from twisted.internet import defer, protocol, error, reactor
+from twisted.internet.endpoints import serverFromString
 from twisted.application import service, internet
 from twisted.python.failure import Failure
 
@@ -25,19 +26,39 @@ except ImportError:
     pass
 
 
+# XXX
+# eventually get rid of this function...
+# but keep this modified version so the unit tests pass
 def parse_strport(port):
     if port.startswith("unix:"):
         raise ValueError("UNIX sockets are not supported for Listeners")
     mo = re.search(r'^(tcp:)?(?P<port>\d+)(:interface=(?P<interface>[\d\.]+))?$', port)
     if not mo:
         raise ValueError("Unable to parse port string '%s'" % (port,))
-    portnum = int(mo.group('port'))
-    interface = mo.group('interface') or ""
-    # TODO: IPv6
-    return (portnum, interface)
+    return port
+
+
+ONLY_PORT_RE=re.compile(r"^(\d{1,5})$")
+
+# convert 'port' strings to twisted server endpoint descriptors
+# 'port' strings can look like this:
+#  80
+#  tcp:80
+#  tcp:80:interface=127.0.0.1
+# 
+# Only the first 'port' string type is incompatible with twisted endpoints
+#
+# if no regex match then pass through
+def port_string_to_server_endpoint(port_s):
+    only_port_mo = ONLY_PORT_RE.search(port_s)
+    endpointDesc = port_s
+    if only_port_mo:
+        endpointDesc = "tcp:%s" % only_port_mo.group(1)
+    return endpointDesc
+
 
 Listeners = []
-class Listener(protocol.ServerFactory):
+class Listener(protocol.Factory):
     """I am responsible for a single listening port, which may connect to
     multiple Tubs. I have a strports-based Service, which I will attach as a
     child of one of my Tubs. If that Tub disconnects, I will reparent the
@@ -57,21 +78,35 @@ class Listener(protocol.ServerFactory):
         @param port: a L{twisted.application.strports} -style description,
         specifying a TCP server
         """
-        # parse the following 'port' strings:
-        #  80
-        #  tcp:80
-        #  tcp:80:interface=127.0.0.1
-        # we reject UNIX sockets.. I don't know if they ever worked.
 
-        portnum, interface = parse_strport(port)
-        self.port = port
         self.options = options
         self.negotiationClass = negotiationClass
         self.parentTub = None
         self.tubs = {}
         self.redirects = {}
-        self.s = internet.TCPServer(portnum, self, interface=interface)
+
+        # port is either a twisted server endpoint descriptor
+        # or one of these 'port' strings:
+        #  80
+        #  tcp:80
+        #  tcp:80:interface=127.0.0.1
+        #
+        # XXX
+        # we reject UNIX sockets.. I don't know if they ever worked.
+        port_str     = parse_strport(port)
+        endpointDesc = port_string_to_server_endpoint(port_str)
+        endpoint     = serverFromString(reactor, endpointDesc)
+
+        self.port          = endpointDesc
+        self.endpoint      = endpoint
+        self.listeningPort = None
+        listenDeferred     = endpoint.listen(self)
+        listenDeferred.addCallback(callback=lambda x: self.setPort(x))
+
         Listeners.append(self)
+
+    def setPort(self, p):
+        self.listeningPort = port
 
     def getPortnum(self):
         """When this Listener was created with a port string of '0' or
@@ -85,8 +120,8 @@ class Listener(protocol.ServerFactory):
             t.setLocation('localhost:%d' % l.getPortnum())
         """
 
-        assert self.s.running
-        return self.s._port.getHost().port
+        assert self.listeningPort is not None
+        return self.listeningPort.getHost()[1]
 
     def __repr__(self):
         if self.tubs:
@@ -142,10 +177,10 @@ class Listener(protocol.ServerFactory):
 
     def startFactory(self):
         log.msg("Starting factory %r" % self, facility="foolscap.listener")
-        return protocol.ServerFactory.startFactory(self)
+        return protocol.Factory.startFactory(self)
     def stopFactory(self):
         log.msg("Stopping factory %r" % self, facility="foolscap.listener")
-        return protocol.ServerFactory.stopFactory(self)
+        return protocol.Factory.stopFactory(self)
 
 
     def buildProtocol(self, addr):
