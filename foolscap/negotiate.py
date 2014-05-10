@@ -1,6 +1,7 @@
 # -*- test-case-name: foolscap.test.test_negotiate -*-
 
 import time
+#from exceptions import ValueError
 from twisted.python.failure import Failure
 from twisted.internet import protocol, reactor
 from twisted.internet.error import ConnectionDone
@@ -11,7 +12,7 @@ from foolscap.referenceable import NEW_STYLE_HINT_RE, OLD_STYLE_HINT_RE
 from foolscap.eventual import eventually
 from foolscap.tokens import SIZE_LIMIT, ERROR, NoLocationHintsError, \
      BananaError, NegotiationError, RemoteNegotiationError, \
-     DuplicateConnection
+     DuplicateConnection, InvalidEndpointDescriptorError
 from foolscap.ipb import DeadReferenceError
 from foolscap.banana import int2b128
 from foolscap.logging import log
@@ -1229,6 +1230,7 @@ class TubConnectorFactory(protocol.Factory, object):
     def __init__(self, tc, logparent):
         self.tc = tc # the TubConnector
         self._logparent = logparent
+        self.proto = None
 
     def log(self, *args, **kwargs):
         kwargs['parent'] = self._logparent
@@ -1271,7 +1273,8 @@ class TubConnectorFactory(protocol.Factory, object):
 
     # XXX
     def disconnect(self):
-        self.proto.transport.loseConnection()
+        if self.proto:
+            self.proto.transport.loseConnection()
 
 
 class TubConnector(object):
@@ -1305,24 +1308,8 @@ class TubConnector(object):
                                   facility="foolscap.connection")
         self.tub = parent
         self.target = tubref
-        hints = []
+        self.remainingLocations = map(str,self.target.getEndpointDescriptors())
 
-        # for the time being...
-        # continue to filter out non-tcp endpoints so that
-        # the unit tests pass
-
-        for hint in self.target.getLocations():
-            mo_new = NEW_STYLE_HINT_RE.search(hint)
-            mo_old = OLD_STYLE_HINT_RE.search(hint)
-            if mo_new:
-                endpointDesc = "%s:host=%s:port=%s" % ( mo_new.group(1), mo_new.group(2), mo_new.group(3) )
-            elif mo_old:
-                endpointDesc = "tcp:host=%s:port=%s" % ( mo_old.group(1), mo_old.group(2) )
-            else:
-                endpointDesc = hint
-            hints.append( endpointDesc )
-
-        self.remainingLocations = hints
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
         self.attemptedLocations = []
@@ -1388,7 +1375,13 @@ class TubConnector(object):
             self.attemptedLocations.append(location)
             lp = self.log("connect to %s" % (location,))
             f = TubConnectorFactory(self, lp)
-            endpoint = clientFromString(reactor, location)
+
+            try:
+                endpoint = clientFromString(reactor, location)
+            except ValueError, e:
+                # this may happen if there is no available parser for the endpoint descriptor
+                self.failureReason = Failure(InvalidEndpointDescriptorError(e))
+                continue
 
             connectDeferred = endpoint.connect(f)
             self.pendingConnections[f] = connectDeferred

@@ -5,7 +5,8 @@ from twisted.internet import defer, protocol, reactor
 from twisted.internet.error import ConnectionRefusedError
 from foolscap.api import RemoteInterface, Referenceable, flushEventualQueue, \
      BananaError
-from foolscap.referenceable import RemoteReference, encode_furl, decode_furl
+from foolscap.referenceable import RemoteReference, encode_furl, \
+    encode_furl_endpoints, decode_furl, decode_furl_endpoints
 from foolscap.test.common import HelperTarget, RIHelper, ShouldFailMixin, \
      crypto_available, GoodEnoughTub
 from foolscap.tokens import NegotiationError
@@ -440,6 +441,28 @@ class Bad(Base, unittest.TestCase):
         d.addCallback(_introduce)
         return d
 
+    def test_tubid_endpoints(self):
+        self.createCharacters()
+        d = self.createInitialReferences()
+        d.addCallback(lambda res: self.tubA.getReference(self.dave_url))
+        def _introduce(adave):
+            # The second way is to mangle the tubid, which will result in a
+            # failure during negotiation. We mangle it by reversing the
+            # characters: this makes it syntactically valid but highly
+            # unlikely to remain the same. NOTE: this will have to change
+            # when we modify the way gifts are referenced, since tracker.url
+            # is scheduled to go away.
+            (encrypted, tubid, endpoint_descriptors, name) = \
+                decode_furl_endpoints(adave.tracker.url)
+            tubid = "".join(reversed(tubid))
+            adave.tracker.url = encode_furl_endpoints(encode_furl, tubid,
+                                            endpoint_descriptors, name)
+            return self.shouldFail(BananaError, "Bad.test_tubid", "unknown TubID",
+                                   self.acarol.callRemote, "set", adave)
+        d.addCallback(_introduce)
+        return d
+
+
     def test_location(self):
         self.createCharacters()
         d = self.createInitialReferences()
@@ -452,7 +475,7 @@ class Bad(Base, unittest.TestCase):
             (encrypted, tubid, location_hints, name) = \
                 decode_furl(adave.tracker.url)
             # highly unlikely that there's anything listening on this port
-            location_hints = [ "tcp:127.0.0.1:2" ]
+            location_hints = [ ("tcp", "127.0.0.1", 2) ]
             adave.tracker.url = encode_furl(encode_furl, tubid,
                                             location_hints, name)
             return self.shouldFail(ConnectionRefusedError, "Bad.test_location",
@@ -460,6 +483,28 @@ class Bad(Base, unittest.TestCase):
                                    self.acarol.callRemote, "set", adave)
         d.addCallback(_introduce)
         return d
+
+    def test_location_endpoint(self):
+        self.createCharacters()
+        d = self.createInitialReferences()
+        d.addCallback(lambda res: self.tubA.getReference(self.dave_url))
+        def _introduce(adave):
+            # The third way is to mangle the location hints, which will
+            # result in a failure during negotiation as it attempts to
+            # establish a TCP connection.
+
+            (encrypted, tubid, endpoint_descriptors, name) = \
+                decode_furl_endpoints(adave.tracker.url)
+            # highly unlikely that there's anything listening on this port
+            endpoint_descriptors = [ 'tcp:127.0.0.1:2' ]
+            adave.tracker.url = encode_furl_endpoints(encode_furl, tubid,
+                                            endpoint_descriptors, name)
+            return self.shouldFail(ConnectionRefusedError, "Bad.test_location",
+                                   "Connection was refused by other side",
+                                   self.acarol.callRemote, "set", adave)
+        d.addCallback(_introduce)
+        return d
+
 
     def test_hang(self):
         f = protocol.Factory()
@@ -477,9 +522,43 @@ class Bad(Base, unittest.TestCase):
             # connection timeout.
             (encrypted, tubid, location_hints, name) = \
                 decode_furl(adave.tracker.url)
-            location_hints = [ "tcp:127.0.0.1:%d" % p.getHost().port ]
+            location_hints = [ ("tcp", "127.0.0.1", p.getHost().port) ]
             adave.tracker.url = encode_furl(encode_furl, tubid,
                                             location_hints, name)
+            self.tubD.options['connect_timeout'] = 2
+            return self.shouldFail(NegotiationError, "Bad.test_hang",
+                                   "no connection established within client timeout",
+                                   self.acarol.callRemote, "set", adave)
+        d.addCallback(_introduce)
+        def _stop_listening(res):
+            d1 = p.stopListening()
+            def _done_listening(x):
+                return res
+            d1.addCallback(_done_listening)
+            return d1
+        d.addBoth(_stop_listening)
+        return d
+
+
+    def test_hang_endpoints(self):
+        f = protocol.Factory()
+        f.protocol = protocol.Protocol # ignores all input
+        p = reactor.listenTCP(0, f, interface="127.0.0.1")
+        self.createCharacters()
+        d = self.createInitialReferences()
+        d.addCallback(lambda res: self.tubA.getReference(self.dave_url))
+        def _introduce(adave):
+            # The next form of mangling is to connect to a port which never
+            # responds, which could happen if a firewall were silently
+            # dropping the TCP packets. We can't accurately simulate this
+            # case, but we can connect to a port which accepts the connection
+            # and then stays silent. This should trigger the overall
+            # connection timeout.
+            (encrypted, tubid, endpoint_descriptors, name) = \
+                decode_furl_endpoints(adave.tracker.url)
+            endpoint_descriptors = [ "tcp:127.0.0.1:%d" % p.getHost().port ]
+            adave.tracker.url = encode_furl_endpoints(encode_furl, tubid,
+                                                      endpoint_descriptors, name)
             self.tubD.options['connect_timeout'] = 2
             return self.shouldFail(NegotiationError, "Bad.test_hang",
                                    "no connection established within client timeout",

@@ -136,6 +136,9 @@ class NoLocationError(Exception):
 class NoLocationHintsError(Exception):
     """We cannot make a connection without some location hints"""
 
+class InvalidEndpointDescriptorError(Exception):
+    """We cannot make a connection without valid endpoint descriptors"""
+
 class ISlicer(Interface):
     """I know how to slice objects into tokens."""
 

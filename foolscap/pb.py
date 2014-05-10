@@ -283,7 +283,7 @@ class Tub(service.MultiService):
         self.options = options
         self.logger = flog.theLogger
         self.listeners = []
-        self.locationHints = []
+        self.endpointDescriptors = []
 
         # duplicate-connection management
         self.make_incarnation()
@@ -394,7 +394,7 @@ class Tub(service.MultiService):
         self._maybeConnectToGatherer()
 
     def _maybeConnectToGatherer(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             return
         furls = []
         if self._log_gatherer_furls:
@@ -428,7 +428,7 @@ class Tub(service.MultiService):
 
 
     def getLogPort(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise NoLocationError
         return self._maybeCreateLogPort()
 
@@ -444,14 +444,14 @@ class Tub(service.MultiService):
     def _maybeCreateLogPortFURLFile(self):
         if not self._logport_furlfile:
             return
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             return
         # getLogPortFURL() creates the logport-furlfile as a side-effect
         ignored = self.getLogPortFURL()
         del ignored
 
     def getLogPortFURL(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise NoLocationError
         if self._logport_furl:
             return self._logport_furl
@@ -504,9 +504,9 @@ class Tub(service.MultiService):
         if not self.encrypted and len(hints) > 1:
             raise PBError("Unauthenticated tubs may only have one "
                           "location hint")
-        if self.locationHints:
+        if self.endpointDescriptors:
             raise PBError("Tub.setLocation() can only be called once")
-        self.locationHints = hints
+        self.endpointDescriptors = hints
         self._maybeCreateLogPortFURLFile()
         self._maybeConnectToGatherer()
 
@@ -672,9 +672,9 @@ class Tub(service.MultiService):
         if self.encrypted:
             # TODO: IPv6 dotted-quad addresses have colons, but need to have
             # host:port
-            hints = ",".join(self.locationHints)
+            hints = ",".join(self.endpointDescriptors)
             return "pb://" + self.tubID + "@" + hints + "/" + name
-        return "pbu://" + self.locationHints[0] + "/" + name
+        return "pbu://" + self.endpointDescriptors[0] + "/" + name
 
     def registerReference(self, ref, name=None, furlFile=None):
         """Make a Referenceable available to the outside world. A URL is
@@ -699,7 +699,7 @@ class Tub(service.MultiService):
         one.
         """
 
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise RuntimeError("you must setLocation() before "
                                "you can registerReference()")
         oldfurl = None
@@ -741,7 +741,7 @@ class Tub(service.MultiService):
         retain a strong reference to it. If we must create a new name, use
         preferred_name. If that is None, use a random unguessable name.
         """
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             # without a location, there is no point in giving it a name
             return None
         if self.referenceToName.has_key(ref):

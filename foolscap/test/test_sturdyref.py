@@ -9,15 +9,19 @@ class URL(unittest.TestCase):
     def testURL(self):
         sr = SturdyRef("pb://%s@127.0.0.1:9900/name" % TUB1)
         self.failUnlessEqual(sr.tubID, TUB1)
-        self.failUnlessEqual(sr.locationHints,
+        self.failUnlessEqual(sr.endpointDescriptors,
                              [ "tcp:host=127.0.0.1:port=9900" ])
+        self.failUnlessEqual(sr.locationHints,
+                             [ ("tcp", "127.0.0.1", 9900) ])
         self.failUnlessEqual(sr.name, "name")
 
     def testURLTcp(self):
         sr = SturdyRef("pb://%s@tcp:host=127.0.0.1:port=9900/name" % TUB1)
         self.failUnlessEqual(sr.tubID, TUB1)
-        self.failUnlessEqual(sr.locationHints,
+        self.failUnlessEqual(sr.endpointDescriptors,
                              [ "tcp:host=127.0.0.1:port=9900" ])
+        self.failUnlessEqual(sr.locationHints,
+                             [ ("tcp", "127.0.0.1", 9900) ])
         self.failUnlessEqual(sr.name, "name")
 
     def testTubIDExtensions(self):
@@ -30,18 +34,25 @@ class URL(unittest.TestCase):
     def testLocationHintExtensions(self):
         furl = "pb://%s@127.0.0.1:9900,udp:127.0.0.1:7700/name" % TUB1
         sr = SturdyRef(furl)
+        self.failUnlessEqual(sr.endpointDescriptors,
+                             [ "tcp:host=127.0.0.1:port=9900", "udp:host=127.0.0.1:port=7700" ])
+        # XXX we should consider testing for the udp connection hint here
         self.failUnlessEqual(sr.locationHints,
-                             [ "tcp:host=127.0.0.1:port=9900", "udp:127.0.0.1:7700" ])
+                             [ ("tcp", "127.0.0.1", 9900) ])
         self.failUnlessEqual(sr.getURL(), furl)
 
         furl = "pb://%s@udp:127.0.0.1:7700/name" % TUB1
         sr = SturdyRef(furl)
-        self.failUnlessEqual(sr.locationHints, ['udp:127.0.0.1:7700'])
+        self.failUnlessEqual(sr.endpointDescriptors, ['udp:host=127.0.0.1:port=7700'])
+        # XXX should we test for the udp connection hint?
+        self.failUnlessEqual(sr.locationHints, [])
         self.failUnlessEqual(sr.getURL(), furl)
 
         furl = "pb://%s@127.0.0.1:7700:postextension/name" % TUB1
         sr = SturdyRef(furl)
-        self.failUnlessEqual(sr.locationHints, ['127.0.0.1:7700:postextension'])
+        self.failUnlessEqual(sr.endpointDescriptors, ['127.0.0.1:7700:postextension'])
+        # XXX should we test for postextension?
+        self.failUnlessEqual(sr.locationHints, [])
         self.failUnlessEqual(sr.getURL(), furl)
 
     def testCompare(self):
@@ -60,9 +71,12 @@ class URL(unittest.TestCase):
         url = "pb://%s@127.0.0.1:9900,remote:8899/name" % TUB1
         sr = SturdyRef(url)
         self.failUnlessEqual(sr.tubID, TUB1)
-        self.failUnlessEqual(sr.locationHints,
+        self.failUnlessEqual(sr.endpointDescriptors,
                              [ "tcp:host=127.0.0.1:port=9900",
                                "tcp:host=remote:port=8899" ])
+        self.failUnlessEqual(sr.locationHints,
+                             [ ("tcp", "127.0.0.1", 9900),
+                               ("tcp", "remote", 8899) ])
         self.failUnlessEqual(sr.name, "name")
 
     def testBrokenHints(self):

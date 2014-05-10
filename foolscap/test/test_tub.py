@@ -11,7 +11,8 @@ from foolscap.referenceable import RemoteReference
 from foolscap.eventual import eventually, fireEventually, flushEventualQueue
 from foolscap.test.common import HelperTarget, TargetMixin, ShouldFailMixin, \
      crypto_available, GoodEnoughTub, StallMixin
-from foolscap.tokens import WrongTubIdError, PBError, NoLocationHintsError
+from foolscap.tokens import WrongTubIdError, PBError, NoLocationHintsError, \
+    InvalidEndpointDescriptorError
 
 # create this data with:
 #  t = Tub()
@@ -106,7 +107,12 @@ class SetLocation(unittest.TestCase):
             sr = SturdyRef(furl)
             portnum = l.getPortnum()
             if sr.encrypted:
-                self.failUnless( "tcp:host=127.0.0.1:port=%d" % portnum in sr.locationHints)
+                for lh in sr.locationHints:
+                    self.failUnlessEqual(lh[2], portnum, lh)
+                # XXX - test for backwards compatibility
+                self.failUnless( ("tcp", "127.0.0.1", portnum)
+                                 in sr.locationHints)
+                self.failUnless( "tcp:host=127.0.0.1:port=%d" % portnum in sr.endpointDescriptors)
             else:
                 # TODO: unauthenticated tubs need review, I think they
                 # deserve to have tubids and multiple connection hints
@@ -443,5 +449,27 @@ class BadLocationFURL(unittest.TestCase):
         def _check(f):
             self.failUnless(isinstance(f, failure.Failure), f)
             self.failUnless(f.check(NoLocationHintsError), f)
+        d.addBoth(_check)
+        return d
+
+    def test_future(self):
+        tubA = GoodEnoughTub()
+        tubA.setServiceParent(self.s)
+        tubB = GoodEnoughTub()
+        tubB.setServiceParent(self.s)
+
+        # "future:stuff" is interpreted as a "location hint format from the
+        # future", which we're supposed to ignore, and are thus left with no
+        # hints
+        tubB.setLocation("future:stuff")
+        r = Receiver(tubB)
+        furl = tubB.registerReference(r)
+        # the buggy behavior is that the following call raises an exception
+        d = tubA.getReference(furl)
+        # whereas it ought to return a Deferred
+        self.failUnless(isinstance(d, defer.Deferred))
+        def _check(f):
+            self.failUnless(isinstance(f, failure.Failure), f)
+            self.failUnless(f.check(InvalidEndpointDescriptorError), f)
         d.addBoth(_check)
         return d
