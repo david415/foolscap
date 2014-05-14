@@ -63,7 +63,9 @@ class CLI(RequiresCryptoBase, unittest.TestCase):
             got_port = open(os.path.join(serverdir, "port"), "r").read().strip()
             self.failIfEqual(got_port, "tcp:0") # it should pick a real port
             portnum = int(got_port[got_port.find(":")+1:])
+
             prefix = open(os.path.join(serverdir, "furl_prefix"), "r").read().strip()
+            #self.failUnless(prefix.endswith(":port=%d/" % portnum), prefix)
             self.failUnless(prefix.endswith(":%d/" % portnum), prefix)
             umask = open(os.path.join(serverdir, "umask")).read().strip()
             self.failUnlessEqual(umask, "0022")
@@ -81,6 +83,7 @@ class CLI(RequiresCryptoBase, unittest.TestCase):
             self.failUnless(os.path.isdir(serverdir))
             # pick an arbitrary port, but FURLs should reference the proxy
             prefix = open(os.path.join(serverdir, "furl_prefix"), "r").read().strip()
+            #self.failUnless(prefix.endswith("@tcp:host=proxy.example.com:port=12345/"), prefix)
             self.failUnless(prefix.endswith("@proxy.example.com:12345/"), prefix)
         d.addCallback(_check)
         return d
@@ -97,6 +100,7 @@ class CLI(RequiresCryptoBase, unittest.TestCase):
             self.failIfEqual(got_port, "tcp:0") # it should pick a real port
             portnum = int(got_port[got_port.find(":")+1:])
             prefix = open(os.path.join(serverdir, "furl_prefix"), "r").read().strip()
+            #self.failUnless(prefix.endswith(":port=%d/" % portnum), prefix)
             self.failUnless(prefix.endswith(":%d/" % portnum), prefix)
         d.addCallback(_check)
         return d
