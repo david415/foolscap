@@ -1273,9 +1273,13 @@ class TubConnectorFactory(protocol.Factory, object):
 
     # XXX
     def disconnect(self):
-        if self.proto:
-            self.proto.transport.loseConnection()
+        self.log("told to disconnect")
 
+        if self in self.tc.pendingConnections:
+            if self.proto:
+                self.proto.transport.loseConnection()
+            else:
+                self.tc.pendingConnections[self].cancel()
 
 class TubConnector(object):
     """I am used to make an outbound connection. I am given a target TubID
@@ -1313,7 +1317,6 @@ class TubConnector(object):
         # attemptedLocations keeps track of where we've already tried to
         # connect, so we don't try them twice.
         self.attemptedLocations = []
-
         # pendingConnections contains a (PBClientFactory -> Connector) map
         # for pairs where connectTCP has started, but negotiation has not yet
         # completed. We keep track of these so we can shut them down when we
@@ -1359,13 +1362,11 @@ class TubConnector(object):
         self.remainingLocations = []
         self.stopConnectionTimer()
         for factory, connectDeferred in self.pendingConnections.items():
-            connectDeferred.cancel()
             # XXX
-            if factory in self.pendingConnections:
-                # my protocol factory is still in self.pendingConnections
-                # because the errback didn't fire because the callback already fired.
-                # so we need to disconnect like this...
-                factory.disconnect()
+            # my protocol factory is still in self.pendingConnections
+            # because the errback didn't fire because the callback already fired.
+            # so we need to disconnect like this...
+            factory.disconnect()
 
     def connectToAll(self):
         while self.remainingLocations:
@@ -1405,9 +1406,13 @@ class TubConnector(object):
     def clientConnectionFailed(self, factory, reason):
         # this is called if some individual TCP connection cannot be
         # established
+
         if not self.failureReason:
             self.failureReason = reason
-        del self.pendingConnections[factory]
+
+        if factory in self.pendingConnections:
+            del self.pendingConnections[factory]
+
         self.checkForFailure()
         self.checkForIdle()
 
@@ -1429,6 +1434,7 @@ class TubConnector(object):
             # don't let mundane things like ConnectionFailed override the
             # actually significant ones like NegotiationError
             self.failureReason = reason
+
         del self.pendingConnections[factory]
         self.checkForFailure()
         self.checkForIdle()
@@ -1442,14 +1448,13 @@ class TubConnector(object):
             self.timer.cancel()
             self.timer = None
         del self.pendingConnections[factory] # this one succeeded
-        for f in self.pendingConnections.keys(): # abandon the others
+        for f, c in self.pendingConnections.items(): # abandon the others
             # for connections that are not yet established, this will trigger
             # clientConnectionFailed. For connections that are established
             # (and exchanging negotiation messages), this does
             # loseConnection() and will thus trigger negotiationFailed.
 
             # XXX
-            self.pendingConnections[f].cancel()
             f.disconnect()
 
         self.checkForIdle()
