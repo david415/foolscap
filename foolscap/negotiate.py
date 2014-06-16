@@ -1261,6 +1261,10 @@ class TubConnectorFactory(protocol.Factory, object):
 
     def stopFactory(self):
         self.log("Stopping factory %r" % self)
+
+        # XXX
+        self.tc.tub.connectorFinished(self.tc)
+
         return protocol.Factory.stopFactory(self)
 
     def buildProtocol(self, addr):
@@ -1361,7 +1365,7 @@ class TubConnector(object):
         self.active = False
         self.remainingLocations = []
         self.stopConnectionTimer()
-        for factory, connectDeferred in self.pendingConnections.items():
+        for factory in self.pendingConnections.keys():
             # XXX
             # my protocol factory is still in self.pendingConnections
             # because the errback didn't fire because the callback already fired.
