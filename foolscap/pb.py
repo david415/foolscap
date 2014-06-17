@@ -3,6 +3,7 @@
 import os.path, weakref, binascii, re
 from zope.interface import implements
 from twisted.internet import defer, protocol, error
+from twisted.internet.endpoints import serverFromString
 from twisted.application import service, internet
 from twisted.python.failure import Failure
 
@@ -25,6 +26,8 @@ except ImportError:
     pass
 
 
+# TODO: Only used by foolscap.logging.web, remove when
+# that has been migrated to use Twisted endpoints.
 def parse_strport(port):
     if port.startswith("unix:"):
         raise ValueError("UNIX sockets are not supported for Listeners")
@@ -50,28 +53,28 @@ class Listener(protocol.ServerFactory):
 
     # this also serves as the ServerFactory
 
-    def __init__(self, port, options={},
+    def __init__(self, desc, options={},
                  negotiationClass=negotiate.Negotiation):
         """
-        @type port: string
-        @param port: a L{twisted.application.strports} -style description,
-        specifying a TCP server
+        @type desc: string
+        @param desc: a L{twisted.internet.endpoints.serverFromString} -style
+        description, specifying the endpoint to use
         """
-        # parse the following 'port' strings:
-        #  80
-        #  tcp:80
-        #  tcp:80:interface=127.0.0.1
-        # we reject UNIX sockets.. I don't know if they ever worked.
-
-        portnum, interface = parse_strport(port)
-        self.port = port
+        self.desc = desc
         self.options = options
         self.negotiationClass = negotiationClass
         self.parentTub = None
         self.tubs = {}
         self.redirects = {}
-        self.s = internet.TCPServer(portnum, self, interface=interface)
+        # Import the reactor here so we don't mess up reactor selection
+        from twisted.internet import reactor
+        endpoint = serverFromString(reactor, desc)
+        self.s = internet.StreamServerEndpointService(endpoint, self)
+        self.port = None
         Listeners.append(self)
+
+    def setPort(self, port):
+        self.port = port
 
     def getPortnum(self):
         """When this Listener was created with a port string of '0' or
@@ -86,29 +89,40 @@ class Listener(protocol.ServerFactory):
         """
 
         assert self.s.running
-        return self.s._port.getHost().port
+        # TODO: Not all endpoints will necessarily have a port?
+        return self.port.getHost().port
+
+    def getHost(self):
+        """
+        Returns the IAddress provider for the endpoint.
+        """
+        # The IListeningPort is started when we get it.
+        assert self.port
+        return self.port.getHost()
 
     def __repr__(self):
         if self.tubs:
             return "<Listener at 0x%x on %s with tubs %s>" % (
                 abs(id(self)),
-                self.port,
+                self.desc,
                 ",".join([str(k) for k in self.tubs.keys()]))
         return "<Listener at 0x%x on %s with no tubs>" % (abs(id(self)),
-                                                          self.port)
+                                                          self.desc)
 
     def addTub(self, tub):
         if tub.tubID in self.tubs:
             if tub.tubID is None:
                 raise RuntimeError("This Listener (on %s) already has an "
                                    "unauthenticated Tub, you cannot add a "
-                                   "second one" % self.port)
+                                   "second one" % self.desc)
             raise RuntimeError("This Listener (on %s) is already connected "
-                               "to TubID '%s'" % (self.port, tub.tubID))
+                               "to TubID '%s'" % (self.desc, tub.tubID))
         self.tubs[tub.tubID] = tub
         if self.parentTub is None:
             self.parentTub = tub
             self.s.setServiceParent(self.parentTub)
+            if self.s._waitingForPort:
+                self.s._waitingForPort.addCallback(self.setPort)
 
     def removeTub(self, tub):
         # this might return a Deferred, since the removal might cause the
@@ -124,6 +138,8 @@ class Listener(protocol.ServerFactory):
                 # do this? It looks like setServiceParent does
                 # disownServiceParent first, so it may glitch.
                 self.s.setServiceParent(self.parentTub)
+                if self.s._waitingForPort:
+                    self.s._waitingForPort.addCallback(self.setPort)
             else:
                 # no more tubs, this Listener will go away now
                 d = self.s.disownServiceParent()
