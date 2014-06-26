@@ -25,20 +25,6 @@ try:
 except ImportError:
     pass
 
-
-# TODO: Only used by foolscap.logging.web, remove when
-# that has been migrated to use Twisted endpoints.
-def parse_strport(port):
-    if port.startswith("unix:"):
-        raise ValueError("UNIX sockets are not supported for Listeners")
-    mo = re.search(r'^(tcp:)?(?P<port>\d+)(:interface=(?P<interface>[\d\.]+))?$', port)
-    if not mo:
-        raise ValueError("Unable to parse port string '%s'" % (port,))
-    portnum = int(mo.group('port'))
-    interface = mo.group('interface') or ""
-    # TODO: IPv6
-    return (portnum, interface)
-
 Listeners = []
 class Listener(protocol.Factory):
     """I am responsible for a single listening port, which may connect to
