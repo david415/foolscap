@@ -75,13 +75,11 @@ class Listener(protocol.Factory):
         else:
             self.endpointDescriptor = "tcp:%s" % str(endpointDescriptor)
 
-
         from twisted.internet import reactor
 
         # XXX should we try except around the serverFromString
         # to handle invalid endpoint descriptor strings?
         self.endpoint = serverFromString(reactor, self.endpointDescriptor)
-        self.port = None
         Listeners.append(self)
 
     def setListeningPort(self, listeningPort):
