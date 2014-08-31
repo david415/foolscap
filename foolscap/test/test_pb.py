@@ -435,6 +435,9 @@ class TestCallable(unittest.TestCase):
             self.failUnlessEqual(peer.host, "127.0.0.1")
             self.failUnlessEqual(rref.getRemoteTubID(), self.tubB.getTubID())
             self.failUnlessEqual(rref.isConnected(), True)
+
+            self.failUnlessEqual(rref.getEndpointDescriptors(),
+                                 ["tcp:host=127.0.0.1:port=%d" % self.tub_ports[1]])
             self.failUnlessEqual(rref.getLocationHints(),
                                  [('tcp', '127.0.0.1', self.tub_ports[1])])
         d.addCallback(_check)
