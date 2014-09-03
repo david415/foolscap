@@ -944,8 +944,21 @@ def convert_endpoints_to_hints(endpoints):
             pieces = endpoint.split(':')
             # XXX
             if pieces[0] == 'tcp':
-                fields = dict([f.split("=") for f in pieces[1:]])
-                hint = ("tcp", fields["host"], int(fields["port"]))
+
+                fields = dict([f.split("=") for f in filter(lambda x: "=" in x,pieces[1:])])
+
+                if fields.has_key("host"):
+                    host = fields["host"]
+                else:
+                    host = pieces[1]
+
+                if fields.has_key("port"):
+                    port = fields["port"]
+                else:
+                    port = pieces[2]
+
+                hint = ("tcp", host, int(port))
+
             else:
                 # XXX
                 # Ignore other things from the future.
@@ -958,7 +971,8 @@ def convert_hints_to_endpoints(hints):
     endpoints = []
     if hints is not None:
         for hint in hints:
-            endpoints.append("%s:%s:%s" % hints)
+            # XXX
+            endpoints.append("%s:%s:%s" % hint)
     return endpoints
 
 class SturdyRef(Copyable, RemoteCopy):

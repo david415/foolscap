@@ -3,7 +3,8 @@
 import os.path, weakref, binascii, re
 from zope.interface import implements
 from twisted.internet import defer, protocol, error
-from twisted.application import service, internet
+from twisted.internet.endpoints import serverFromString
+from twisted.application import service
 from twisted.python.failure import Failure
 
 from foolscap import ipb, base32, negotiate, broker, observer, eventual, storage
@@ -25,23 +26,22 @@ except ImportError:
     pass
 
 
+# this function should be removed soon
 def parse_strport(port):
-    if port.startswith("unix:"):
-        raise ValueError("UNIX sockets are not supported for Listeners")
+
     mo = re.search(r'^(tcp:)?(?P<port>\d+)(:interface=(?P<interface>[\d\.]+))?$', port)
     if not mo:
         raise ValueError("Unable to parse port string '%s'" % (port,))
     portnum = int(mo.group('port'))
     interface = mo.group('interface') or ""
-    # TODO: IPv6
+
     return (portnum, interface)
 
+
 Listeners = []
-class Listener(protocol.ServerFactory):
-    """I am responsible for a single listening port, which may connect to
-    multiple Tubs. I have a strports-based Service, which I will attach as a
-    child of one of my Tubs. If that Tub disconnects, I will reparent the
-    Service to a remaining one.
+class Listener(protocol.Factory):
+    """I am responsible for a single endpoint-based listening port, which may connect to
+    multiple Tubs.
 
     Unauthenticated Tubs use a TubID of 'None'. There may be at most one such
     Tub attached to any given Listener."""
@@ -50,29 +50,50 @@ class Listener(protocol.ServerFactory):
 
     # this also serves as the ServerFactory
 
-    def __init__(self, port, options={},
+    def __init__(self, endpointDescriptor, options={},
                  negotiationClass=negotiate.Negotiation):
         """
-        @type port: string
-        @param port: a L{twisted.application.strports} -style description,
-        specifying a TCP server
+        @type endpointDescriptor: string
+        @param endpointDescriptor: a L{twisted.internet.endpoints.serverFromString} -style
+        description, specifying the endpoint to use
         """
-        # parse the following 'port' strings:
-        #  80
-        #  tcp:80
-        #  tcp:80:interface=127.0.0.1
-        # we reject UNIX sockets.. I don't know if they ever worked.
 
-        portnum, interface = parse_strport(port)
-        self.port = port
+        try:
+            portnum, interface = parse_strport(endpointDescriptor)
+            self.port = portnum
+        except ValueError, e:
+            # XXX
+            self.port = 0
+
+        self.listeningPort = None
+        self.running = False
+        self.listeningDeferred = None
+        self.endpointDescriptor = endpointDescriptor
         self.options = options
         self.negotiationClass = negotiationClass
-        self.parentTub = None
         self.tubs = {}
         self.redirects = {}
-        self.s = internet.TCPServer(portnum, self, interface=interface)
+
+        # XXX backwards compatibility
+        try:
+            int(endpointDescriptor)
+        except ValueError:
+            self.endpointDescriptor = endpointDescriptor
+        else:
+            self.endpointDescriptor = "tcp:%s" % str(endpointDescriptor)
+
+        from twisted.internet import reactor
+
+        # XXX should we try except around the serverFromString
+        # to handle invalid endpoint descriptor strings?
+        self.endpoint = serverFromString(reactor, self.endpointDescriptor)
         Listeners.append(self)
 
+    def setListeningPort(self, listeningPort):
+        self.listeningPort = listeningPort
+
+    # this method should be removed soon; use getHost() instead.
+    # we should replace tcp idioms with endpoint agnostic idioms
     def getPortnum(self):
         """When this Listener was created with a port string of '0' or
         'tcp:0' (meaning 'please allocate me something'), and if the Listener
@@ -84,55 +105,75 @@ class Listener(protocol.ServerFactory):
             l = t.listenOn('tcp:0')
             t.setLocation('localhost:%d' % l.getPortnum())
         """
+        assert self.running
 
-        assert self.s.running
-        return self.s._port.getHost().port
+        if not self.listeningPort:
+            return self.port
+
+        # TODO: Not all endpoints will necessarily have a port?
+        return self.listeningPort.getHost().port
+
+    def getHost(self):
+        """
+        Returns the IAddress provider for the endpoint.
+        """
+        # The IListeningPort is started when we get it.
+        assert self.listeningPort
+        return self.listeningPort.getHost()
 
     def __repr__(self):
         if self.tubs:
             return "<Listener at 0x%x on %s with tubs %s>" % (
                 abs(id(self)),
-                self.port,
+                self.endpointDescriptor,
                 ",".join([str(k) for k in self.tubs.keys()]))
         return "<Listener at 0x%x on %s with no tubs>" % (abs(id(self)),
-                                                          self.port)
+                                                          self.endpointDescriptor)
 
     def addTub(self, tub):
         if tub.tubID in self.tubs:
             if tub.tubID is None:
                 raise RuntimeError("This Listener (on %s) already has an "
                                    "unauthenticated Tub, you cannot add a "
-                                   "second one" % self.port)
+                                   "second one" % self.endpointDescriptor)
             raise RuntimeError("This Listener (on %s) is already connected "
-                               "to TubID '%s'" % (self.port, tub.tubID))
+                               "to TubID '%s'" % (self.endpointDescriptor, tub.tubID))
         self.tubs[tub.tubID] = tub
-        if self.parentTub is None:
-            self.parentTub = tub
-            self.s.setServiceParent(self.parentTub)
+
+    def startListening(self):
+        if self.running:
+            return
+
+        self.running = True
+
+        # XXX
+        self.listeningDeferred = self.endpoint.listen(self)
+        self.listeningDeferred.addCallback(self.setListeningPort)
+
+    def stopListening(self):
+
+        if not self.running:
+            return defer.succeed(None)
+
+        Listeners.remove(self)
+        self.running = False
+        self.tubs = {}
+
+        if self.listeningPort is not None:
+            d = self.listeningPort.stopListening()
+        return d
 
     def removeTub(self, tub):
         # this might return a Deferred, since the removal might cause the
         # Listener to shut down. It might also return None.
         del self.tubs[tub.tubID]
-        if self.parentTub is tub:
-            # we need to switch to a new one
-            tubs = self.tubs.values()
-            if tubs:
-                self.parentTub = tubs[0]
-                # TODO: I want to do this without first doing
-                # disownServiceParent, so the port remains listening. Can we
-                # do this? It looks like setServiceParent does
-                # disownServiceParent first, so it may glitch.
-                self.s.setServiceParent(self.parentTub)
-            else:
-                # no more tubs, this Listener will go away now
-                d = self.s.disownServiceParent()
-                Listeners.remove(self)
-                return d
-        return None
-
-    def getService(self):
-        return self.s
+        d = None
+        if not self.tubs:
+            # no more tubs, this Listener will go away now
+            Listeners.remove(self)
+            if self.listeningPort is not None:
+                d = self.listeningPort.stopListening()
+        return d
 
     def addRedirect(self, tubID, location):
         assert tubID is not None # unauthenticated Tubs don't get redirects
@@ -142,10 +183,10 @@ class Listener(protocol.ServerFactory):
 
     def startFactory(self):
         log.msg("Starting factory %r" % self, facility="foolscap.listener")
-        return protocol.ServerFactory.startFactory(self)
+        return protocol.Factory.startFactory(self)
     def stopFactory(self):
         log.msg("Stopping factory %r" % self, facility="foolscap.listener")
-        return protocol.ServerFactory.stopFactory(self)
+        return protocol.Factory.stopFactory(self)
 
 
     def buildProtocol(self, addr):
@@ -283,7 +324,7 @@ class Tub(service.MultiService):
         self.options = options
         self.logger = flog.theLogger
         self.listeners = []
-        self.locationHints = []
+        self.endpointDescriptors = []
 
         # duplicate-connection management
         self.make_incarnation()
@@ -394,7 +435,7 @@ class Tub(service.MultiService):
         self._maybeConnectToGatherer()
 
     def _maybeConnectToGatherer(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             return
         furls = []
         if self._log_gatherer_furls:
@@ -428,7 +469,7 @@ class Tub(service.MultiService):
 
 
     def getLogPort(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise NoLocationError
         return self._maybeCreateLogPort()
 
@@ -444,14 +485,14 @@ class Tub(service.MultiService):
     def _maybeCreateLogPortFURLFile(self):
         if not self._logport_furlfile:
             return
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             return
         # getLogPortFURL() creates the logport-furlfile as a side-effect
         ignored = self.getLogPortFURL()
         del ignored
 
     def getLogPortFURL(self):
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise NoLocationError
         if self._logport_furl:
             return self._logport_furl
@@ -504,9 +545,9 @@ class Tub(service.MultiService):
         if not self.encrypted and len(hints) > 1:
             raise PBError("Unauthenticated tubs may only have one "
                           "location hint")
-        if self.locationHints:
+        if self.endpointDescriptors:
             raise PBError("Tub.setLocation() can only be called once")
-        self.locationHints = hints
+        self.endpointDescriptors = hints
         self._maybeCreateLogPortFURLFile()
         self._maybeConnectToGatherer()
 
@@ -534,6 +575,14 @@ class Tub(service.MultiService):
             # we can't use get_local_ip_for until the reactor is running
             return util.get_local_ip_for()
         d.addCallback(_reactor_running)
+
+        def _start_listeners(local_address):
+            deferred_list = []
+            for l in self.getListeners():
+                l.startListening()
+                deferred_list.append(l.listeningDeferred)
+            return defer.DeferredList(deferred_list).addCallback(lambda ignore: local_address)
+        d.addCallback(_start_listeners)
 
         def _got_local_ip(local_address):
             local_addresses = set(extra_addresses)
@@ -576,6 +625,10 @@ class Tub(service.MultiService):
         assert l not in self.listeners
         l.addTub(self)
         self.listeners.append(l)
+
+        if self.running:
+            l.startListening()
+
         return l
 
     def stopListeningOn(self, l):
@@ -615,7 +668,12 @@ class Tub(service.MultiService):
                 self._allConnectorsAreFinished.fire(self)
 
     def startService(self):
+
+        for l in self.listeners:
+            l.startListening()
+
         service.MultiService.startService(self)
+
         for d,sturdy in self._pending_getReferences:
             d1 = eventual.fireEventually(sturdy)
             d1.addCallback(self.getReference)
@@ -630,6 +688,7 @@ class Tub(service.MultiService):
         raise RuntimeError("Sorry, but this Tub has been shut down.")
 
     def stopService(self):
+
         # note that once you stopService a Tub, I cannot be restarted. (at
         # least this code is not designed to make that possible.. it might be
         # doable in the future).
@@ -645,9 +704,10 @@ class Tub(service.MultiService):
             # TODO: rethink this, what I want is for stopService to cause all
             # Listeners to shut down, but I'm not sure this is the right way
             # to do it.
-            d = l.removeTub(self)
+            d = l.stopListening()
             if isinstance(d, defer.Deferred):
                 dl.append(d)
+
         dl.append(service.MultiService.stopService(self))
 
         if self._activeConnectors:
@@ -672,9 +732,9 @@ class Tub(service.MultiService):
         if self.encrypted:
             # TODO: IPv6 dotted-quad addresses have colons, but need to have
             # host:port
-            hints = ",".join(self.locationHints)
+            hints = ",".join(self.endpointDescriptors)
             return "pb://" + self.tubID + "@" + hints + "/" + name
-        return "pbu://" + self.locationHints[0] + "/" + name
+        return "pbu://" + self.endpointDescriptors[0] + "/" + name
 
     def registerReference(self, ref, name=None, furlFile=None):
         """Make a Referenceable available to the outside world. A URL is
@@ -699,7 +759,7 @@ class Tub(service.MultiService):
         one.
         """
 
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             raise RuntimeError("you must setLocation() before "
                                "you can registerReference()")
         oldfurl = None
@@ -744,7 +804,7 @@ class Tub(service.MultiService):
         retain a strong reference to it. If we must create a new name, use
         preferred_name. If that is None, use a random unguessable name.
         """
-        if not self.locationHints:
+        if not self.endpointDescriptors:
             # without a location, there is no point in giving it a name
             return None
         if self.referenceToName.has_key(ref):

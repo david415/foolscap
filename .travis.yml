@@ -9,3 +9,4 @@ script:
   - make pyflakes
   - python setup.py build
   - make test
+
