@@ -151,10 +151,14 @@ class Listener(protocol.Factory):
         self.listeningDeferred.addCallback(self.setListeningPort)
 
     def stopListening(self):
+
+        if not self.running:
+            return defer.succeed(None)
+
         Listeners.remove(self)
         self.running = False
         self.tubs = {}
-        d = None
+
         if self.listeningPort is not None:
             d = self.listeningPort.stopListening()
         return d
