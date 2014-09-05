@@ -136,6 +136,14 @@ class NoLocationError(Exception):
 class NoLocationHintsError(Exception):
     """We cannot make a connection without some location hints"""
 
+class UnreachableLocationError(Exception):
+    """Unreachable means don't call me I'll call you"""
+
+class UnreachableTubLocation(object):
+    """I am a marker class"""
+
+UNREACHABLE = UnreachableTubLocation()
+
 class InvalidEndpointDescriptorError(Exception):
     """We cannot make a connection without valid endpoint descriptors"""
 

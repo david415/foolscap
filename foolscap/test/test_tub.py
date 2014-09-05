@@ -12,7 +12,7 @@ from foolscap.eventual import eventually, fireEventually, flushEventualQueue
 from foolscap.test.common import HelperTarget, TargetMixin, ShouldFailMixin, \
      crypto_available, GoodEnoughTub, StallMixin
 from foolscap.tokens import WrongTubIdError, PBError, NoLocationHintsError, \
-    InvalidEndpointDescriptorError
+    InvalidEndpointDescriptorError, UnreachableLocationError, UNREACHABLE
 
 # create this data with:
 #  t = Tub()
@@ -96,6 +96,13 @@ class SetLocation(unittest.TestCase):
         t.setLocation("127.0.0.1:12345")
         # setLocation may only be called once
         self.failUnlessRaises(PBError, t.setLocation, "127.0.0.1:12345")
+
+    def test_set_location_unreachable(self):
+        t = GoodEnoughTub()
+        t.setServiceParent(self.s)
+        t.setLocation(UNREACHABLE)
+        self.failUnlessEqual(t.endpointDescriptors, [])
+        self.failUnlessRaises(UnreachableLocationError,t.registerReference, Referenceable())
 
     def test_set_location_automatically(self):
         t = GoodEnoughTub()

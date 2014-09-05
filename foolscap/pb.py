@@ -11,7 +11,7 @@ from foolscap import ipb, base32, negotiate, broker, observer, eventual, storage
 from foolscap import util
 from foolscap.referenceable import SturdyRef
 from foolscap.tokens import PBError, BananaError, WrongTubIdError, \
-     WrongNameError, NoLocationError
+     WrongNameError, NoLocationError, UnreachableLocationError, UnreachableTubLocation, UNREACHABLE
 from foolscap.reconnector import Reconnector
 from foolscap.logging import log as flog
 from foolscap.logging import log
@@ -276,6 +276,7 @@ class Tub(service.MultiService):
 
     def __init__(self, certData=None, certFile=None, options={}):
         service.MultiService.__init__(self)
+        self.unreachable = False
         self.setup(options)
         if certFile:
             self.setupEncryptionFile(certFile)
@@ -542,6 +543,10 @@ class Tub(service.MultiService):
         Encrypted Tubs can have multiple location hints, just provide
         multiple arguments. Unauthenticated Tubs can only have one location."""
 
+        if isinstance(hints[0], UnreachableTubLocation):
+            self.unreachable = True
+            return
+
         if not self.encrypted and len(hints) > 1:
             raise PBError("Unauthenticated tubs may only have one "
                           "location hint")
@@ -616,6 +621,9 @@ class Tub(service.MultiService):
         stop listening later on, to have another Tub listen on the same port,
         and to figure out which port was allocated when you used a strports
         specification of 'tcp:0'. """
+
+        if self.unreachable:
+            raise UnreachableLocationError("Cannot listen on an unreachable location.")
 
         if type(what) is str:
             l = Listener(what, options, self.negotiationClass)
@@ -758,6 +766,9 @@ class Tub(service.MultiService):
         to Tub.getReference() in any Tub on any host which can reach this
         one.
         """
+
+        if self.unreachable:
+            raise UnreachableLocationError("Cannot register reference for unreachable Tub.")
 
         if not self.endpointDescriptors:
             raise RuntimeError("you must setLocation() before "
