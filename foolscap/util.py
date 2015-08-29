@@ -1,6 +1,8 @@
 import os, sys
 import socket
 import time
+from netifaces import interfaces, ifaddresses, AF_INET
+
 from twisted.internet import defer, reactor, protocol
 
 
@@ -111,3 +113,10 @@ def move_into_place(source, dest):
         except:
             pass
     os.rename(source, dest)
+
+def get_all_ip_addresses():
+    """Synchronously get all system IPv4 addresses, returns the list.
+    """
+    for ifaceName in interfaces():
+        addresses = [i['addr'] for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}] )]
+    return addresses
