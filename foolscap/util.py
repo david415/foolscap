@@ -2,6 +2,7 @@ import os, sys
 import socket
 import time
 from twisted.internet import defer, reactor, protocol
+from twisted.internet.endpoints import serverFromString
 
 
 class AsyncAND(defer.Deferred):
@@ -111,3 +112,17 @@ def move_into_place(source, dest):
         except:
             pass
     os.rename(source, dest)
+
+@defer.inlineCallbacks
+def available_tcp_port(reactor):
+    """
+    Returns a Deferred firing an available TCP port on localhost.
+    It does so by listening on port 0; then stopListening and fires the
+    assigned port number.
+    """
+
+    endpoint = serverFromString(reactor, 'tcp:0:interface=127.0.0.1')
+    port = yield endpoint.listen(NoOpProtocolFactory())
+    address = port.getHost()
+    yield port.stopListening()
+    defer.returnValue(address.port)
