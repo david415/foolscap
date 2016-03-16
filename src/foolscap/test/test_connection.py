@@ -1,14 +1,33 @@
+
+from txsocksx.client import SOCKS5ClientEndpoint
+from txsocksx.test.util import FakeEndpoint
+
 from zope.interface import implementer
 from twisted.trial import unittest
-from twisted.internet import endpoints
+from twisted.internet import endpoints, reactor
 from twisted.application import service
 from foolscap.api import Tub
 from foolscap.connection import get_endpoint
-from foolscap.connection_plugins import convert_legacy_hint, DefaultTCP
+from foolscap.connection_plugins import convert_legacy_hint, DefaultTCP, SocksPlugin
 from foolscap.tokens import NoLocationHintsError
 from foolscap.test.common import (certData_low, certData_high, Target,
                                   ShouldFailMixin)
 from foolscap import ipb, util
+
+class SocksPluginTests(unittest.TestCase):
+    def test_defaultFactory(self):
+        def SocksEndpointGenerator(*args, **kw):
+            return FakeEndpoint()
+        plugin = SocksPlugin("127.0.0.1", "9050", proxy_endpoint_generator = SocksEndpointGenerator)
+        hint = "tor:meowhost:80"
+        endpoint, host = plugin.hint_to_endpoint(hint, reactor)
+
+        self.failUnlessEqual("meowhost", host)
+        self.failUnless(isinstance(endpoint, SOCKS5ClientEndpoint))
+
+        endpoint.connect(None)
+        # equivalent to the TestSOCKS5ClientEndpoint.test_defaultFactory test-case.
+        self.assertEqual(endpoint.proxyEndpoint.transport.value(), '\x05\x01\x00')
 
 class Convert(unittest.TestCase):
     def checkTCPEndpoint(self, hint, expected_host, expected_port):
