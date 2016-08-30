@@ -1,5 +1,6 @@
 import os, re
 from twisted.internet.interfaces import IStreamClientEndpoint
+from twisted.internet.endpoints import UNIXClientEndpoint
 from twisted.internet.defer import inlineCallbacks, returnValue, succeed
 import ipaddress
 from .. import observer
@@ -60,9 +61,14 @@ class _Common:
         # bytes with the hostname when talking to the SOCKS server, so the
         # py2 automatic unicode promotion blows up
         host = host.encode("ascii")
-        ep = txtorcon.TorClientEndpoint(host, portnum,
-                                        socks_hostname=self._socks_hostname,
-                                        socks_port=self._socks_portnum)
+        if self._socks_socket is not None:
+            tor_socks_endpoint = UNIXClientEndpoint(reactor, self._socks_socket)
+            ep = txtorcon.TorClientEndpoint(host, portnum,
+                                            socks_endpoint=tor_socks_endpoint)
+        else:
+            ep = txtorcon.TorClientEndpoint(host, portnum,
+                                            socks_hostname=self._socks_hostname,
+                                            socks_port=self._socks_portnum)
         returnValue( (ep, host) )
 
 
@@ -70,11 +76,12 @@ class _Common:
 # This will be fixed in txtorcon 1.0
 
 class _SocksTor(_Common):
-    def __init__(self, hostname=None, portnum=None):
+    def __init__(self, hostname=None, portnum=None, socks_socket=None):
         _Common.__init__(self)
         self._connnected = True # no need to call _connect()
         self._socks_hostname = hostname
         self._socks_portnum = portnum
+        self._socks_socket = socks_socket
         # portnum=None means to use defaults: 9050, then 9150
     def _connect(self, reactor):
         return succeed(None)
@@ -87,6 +94,10 @@ def default_socks():
 def socks_port(host, portnum):
     assert isinstance(portnum, int)
     return _SocksTor(host, portnum)
+
+def socks_socket(socket):
+    assert isinstance(socket, str)
+    return _SocksTor(socks_socket=socket)
 
 
 class _LaunchedTor(_Common):
@@ -117,6 +128,7 @@ class _LaunchedTor(_Common):
         config.SocksPort = allocate_tcp_port()
         self._socks_hostname = "127.0.0.1"
         self._socks_portnum = config.SocksPort
+        self._socks_socket = None
 
         #print "launching tor"
         tpp = yield txtorcon.launch_tor(config, reactor,
@@ -152,18 +164,24 @@ class _ConnectedTor(_Common):
         config = yield txtorcon.TorConfig.from_protocol(tproto)
         ports = list(config.SocksPort)
         # I've seen "9050", and "unix:/var/run/tor/socks WorldWritable"
-        for port in ports:
-            pieces = port.split()
-            p = pieces[0]
-            if p == txtorcon.DEFAULT_VALUE:
-                p = "9050"
-            try:
-                portnum = int(p)
-                self._socks_hostname = "127.0.0.1"
-                self._socks_portnum = portnum
-                return
-            except ValueError:
-                pass
+        pieces = ports[0].split()
+        p = pieces[0]
+        if p == txtorcon.DEFAULT_VALUE:
+            p = "9050"
+        try:
+            portnum = int(p)
+            self._socks_hostname = "127.0.0.1"
+            self._socks_portnum = portnum
+            self._socks_socket = None
+            return
+        except ValueError:
+            pieces = ports[0].split(":")
+            pieces = pieces[1].split()
+            self._socks_socket = pieces[0]
+            self._socks_hostname = None
+            self._socks_portnum = None
+            return
+
         raise ValueError("could not use config.SocksPort: %r" % (ports,))
 
 
