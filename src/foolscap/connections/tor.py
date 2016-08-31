@@ -76,13 +76,10 @@ class _Common:
 # This will be fixed in txtorcon 1.0
 
 class _SocksTor(_Common):
-    def __init__(self, hostname=None, portnum=None, socks_socket=None):
+    def __init__(self, socks_endpoint=None):
         _Common.__init__(self)
         self._connnected = True # no need to call _connect()
-        self._socks_hostname = hostname
-        self._socks_portnum = portnum
-        self._socks_socket = socks_socket
-        # portnum=None means to use defaults: 9050, then 9150
+        self._socks_endpoint = socks_endpoint
     def _connect(self, reactor):
         return succeed(None)
 
