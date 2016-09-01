@@ -82,9 +82,9 @@ def default_socks():
     # ports, but it doesn't know to set the hostname to localhost
     return _SocksTor()
 
-def socks(socks_endpoint):
-    assert IStreamClientEndpoint.providedBy(socks_endpoint)
-    return _SocksTor(socks_endpoint)
+def socks_endpoint(tor_socks_endpoint):
+    assert IStreamClientEndpoint.providedBy(tor_socks_endpoint)
+    return _SocksTor(tor_socks_endpoint)
 
 
 class _LaunchedTor(_Common):
