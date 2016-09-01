@@ -113,7 +113,7 @@ class _LaunchedTor(_Common):
 
         #config.ControlPort = allocate_tcp_port() # defaults to 9052
         config.SocksPort = allocate_tcp_port()
-        socks_desc = "tcp:127.0.0.1:" + config.SocksPort
+        socks_desc = "tcp:127.0.0.1:%s" % config.SocksPort
         self._socks_endpoint = clientFromString(reactor, socks_desc)
 
         #print "launching tor"
@@ -157,8 +157,8 @@ class _ConnectedTor(_Common):
                 p = "9050"
             try:
                 portnum = int(p)
-                self._socks_hostname = "127.0.0.1"
-                self._socks_portnum = portnum
+                socks_desc = "tcp:127.0.0.1:" + p
+                self._socks_endpoint = clientFromString(reactor, socks_desc)
                 return
             except ValueError:
                 pass
