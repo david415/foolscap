@@ -83,68 +83,15 @@ def socks_endpoint(tor_socks_endpoint):
     assert IStreamClientEndpoint.providedBy(tor_socks_endpoint)
     return _SocksTor(tor_socks_endpoint)
 
-
-class _LaunchedTor(_Common):
-    def __init__(self, data_directory=None, tor_binary=None):
-        _Common.__init__(self)
-        self._data_directory = data_directory
-        self._tor_binary = tor_binary
-
-    @inlineCallbacks
-    def _connect(self, reactor):
-        # create a new Tor
-        config = self.config = txtorcon.TorConfig()
-        if self._data_directory:
-            # The default is for launch_tor to create a tempdir itself, and
-            # delete it when done. We only need to set a DataDirectory if we
-            # want it to be persistent. This saves some startup time, because
-            # we cache the descriptors from last time. On one of my hosts,
-            # this reduces connect from 20s to 15s.
-            if not os.path.exists(self._data_directory):
-                # tor will mkdir this, but txtorcon wants to chdir to it
-                # before spawning the tor process, so (for now) we need to
-                # mkdir it ourselves. TODO: txtorcon should take
-                # responsibility for this.
-                os.mkdir(self._data_directory)
-            config.DataDirectory = self._data_directory
-
-        #config.ControlPort = allocate_tcp_port() # defaults to 9052
-        config.SocksPort = allocate_tcp_port()
-        socks_desc = "tcp:127.0.0.1:%d" % config.SocksPort
-        self._socks_desc = socks_desc # stash for tests
-        socks_endpoint = clientFromString(reactor, socks_desc)
-
-        #print "launching tor"
-        tpp = yield txtorcon.launch_tor(config, reactor,
-                                        tor_binary=self._tor_binary)
-        #print "launched"
-        # gives a TorProcessProtocol with .tor_protocol
-        self._tor_protocol = tpp.tor_protocol
-        returnValue(socks_endpoint)
-
-def launch(data_directory=None, tor_binary=None):
-    """Return a handler which launches a new Tor process (once).
-    - data_directory: a persistent directory where Tor can cache its
-      descriptors. This allows subsequent invocations to start faster. If
-      None, the process will use an ephemeral tempdir, deleting it when Tor
-      exits.
-    - tor_binary: the path to the Tor executable we should use. If None,
-      search $PATH.
-    """
-    return _LaunchedTor(data_directory, tor_binary)
-
-
 @implementer(IConnectionHintHandler)
 class _ConnectedTor(_Common):
-    def __init__(self, tor_control_endpoint):
+    def __init__(self, tor_provider):
         _Common.__init__(self)
-        assert IStreamClientEndpoint.providedBy(tor_control_endpoint)
-        self._tor_control_endpoint = tor_control_endpoint
+        self._tor_provider= tor_provider
 
     @inlineCallbacks
     def _connect(self, reactor):
-        tproto = yield txtorcon.build_tor_connection(self._tor_control_endpoint,
-                                                     build_state=False)
+        tproto = yield self.tor_provider.get_control_protocol()
         config = yield txtorcon.TorConfig.from_protocol(tproto)
         ports = list(config.SocksPort)
         # I've seen "9050", and "unix:/var/run/tor/socks WorldWritable"
@@ -163,12 +110,8 @@ class _ConnectedTor(_Common):
                 pass
         raise ValueError("could not use config.SocksPort: %r" % (ports,))
 
-
-def control_endpoint(tor_control_endpoint):
-    """Return a handler which connects to a pre-existing Tor process on the
-    given control port.
-    - tor_control_endpoint: a ClientEndpoint which points at the Tor control
-      port
+def handler_from_tor_provider(tor_provider):
+    """Return a handler which uses the given TorProvider's control port
+    to get an SOCKS port when needed.
     """
-    assert IStreamClientEndpoint.providedBy(tor_control_endpoint)
-    return _ConnectedTor(tor_control_endpoint)
+    return _ConnectedTor(tor_provider)
